@@ -1,4 +1,4 @@
-using UnityEngine;
+using UnityEngine; 
 using UnityEngine.InputSystem; // Import the new Input System namespace
 
 public class InputManager : MonoBehaviour
@@ -7,6 +7,8 @@ public class InputManager : MonoBehaviour
 
     private PlayerControls _playerControls;
     private Camera _mainCamera;
+
+    public SeedController testSeedToLaunch; // Assign this in the Inspector
 
     public Vector2 FlickStartPosition { get; private set; }
     public Vector2 FlickEndPosition { get; private set; }
@@ -25,31 +27,65 @@ public class InputManager : MonoBehaviour
             return;
         }
         Instance = this;
-        // DontDestroyOnLoad(gameObject); // Consider if this manager should persist across scenes
 
-        _playerControls = new PlayerControls();
+        try
+        {
+            _playerControls = new PlayerControls();
+            if (_playerControls == null)
+            {
+                Debug.LogError("InputManager: _playerControls is NULL immediately after new PlayerControls()!", this);
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"InputManager: Exception during new PlayerControls(): {e.Message}\n{e.StackTrace}", this);
+        }
+        
         _mainCamera = Camera.main; // Cache the main camera
+        if (_mainCamera == null)
+        {
+            Debug.LogWarning("InputManager: Camera.main is null in Awake(). Will retry later.", this);
+        }
     }
 
     private void OnEnable()
     {
-        _playerControls.Gameplay.Enable();
+        if (_playerControls == null)
+        {
+            Debug.LogError("InputManager: _playerControls is NULL at the start of OnEnable()!", this);
+            return; // Exit OnEnable if _playerControls is null to prevent further errors
+        }
 
-        // Subscribe to the actions
-        _playerControls.Gameplay.FlickPress.started += OnFlickPressStarted;
-        _playerControls.Gameplay.FlickPress.canceled += OnFlickPressCanceled; // Canceled usually means released
+        try
+        {
+            _playerControls.Gameplay.Enable();
+
+            // Subscribe to the actions
+            _playerControls.Gameplay.FlickPress.started += OnFlickPressStarted;
+            _playerControls.Gameplay.FlickPress.canceled += OnFlickPressCanceled; // Canceled usually means released
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"InputManager: Exception during OnEnable(): {e.Message}\n{e.StackTrace}", this);
+        }
     }
 
     private void OnDisable()
     {
-        _playerControls.Gameplay.FlickPress.started -= OnFlickPressStarted;
-        _playerControls.Gameplay.FlickPress.canceled -= OnFlickPressCanceled;
-        
-        _playerControls.Gameplay.Disable();
+        if (_playerControls != null)
+        {
+            _playerControls.Gameplay.FlickPress.started -= OnFlickPressStarted;
+            _playerControls.Gameplay.FlickPress.canceled -= OnFlickPressCanceled;
+            _playerControls.Gameplay.Disable();
+        }
     }
 
     private void OnFlickPressStarted(InputAction.CallbackContext context)
     {
+        if (_playerControls == null) { // Extra safety
+            Debug.LogError("InputManager: OnFlickPressStarted called but _playerControls is null!");
+            return;
+        }
         IsFlicking = true;
         // Read the pointer position AT THE START of the flick
         FlickStartPosition = GetPointerPositionInWorld();
@@ -61,16 +97,38 @@ public class InputManager : MonoBehaviour
 
     private void OnFlickPressCanceled(InputAction.CallbackContext context)
     {
+        if (_playerControls == null) { // Extra safety
+            Debug.LogError("InputManager: OnFlickPressCanceled called but _playerControls is null!");
+            return;
+        }
         if (IsFlicking) // Ensure we were actually flicking
         {
             IsFlicking = false;
             // Read the pointer position AT THE END of the flick
             FlickEndPosition = GetPointerPositionInWorld();
-            OnFlickEnd?.Invoke(FlickStartPosition, FlickEndPosition);
+            OnFlickEnd?.Invoke(FlickStartPosition, FlickEndPosition); // Re-enabled this event
 
             // For debugging:
             Debug.Log($"Flick Ended at Screen: {_playerControls.Gameplay.PointerPosition.ReadValue<Vector2>()}, World: {FlickEndPosition}");
-            Debug.Log($"Flick Vector (World): {FlickEndPosition - FlickStartPosition}");
+            
+            Vector2 flickVector = FlickEndPosition - FlickStartPosition;
+            Debug.Log($"Flick Vector (World): {flickVector}");
+
+            // --- TEMPORARY CODE TO LAUNCH THE SEED ---
+            if (testSeedToLaunch != null)
+            {
+                // Optional: Reset the seed to the start position before launching
+                // This makes repeated testing easier from the same spot
+                testSeedToLaunch.transform.position = FlickStartPosition; 
+                testSeedToLaunch.ResetSeed(FlickStartPosition); // Reset its state and velocity
+
+                testSeedToLaunch.Launch(flickVector);
+            }
+            else
+            {
+                Debug.LogWarning("No Test Seed assigned to InputManager to launch.");
+            }
+            // --- END OF TEMPORARY CODE ---
         }
     }
 
@@ -79,7 +137,16 @@ public class InputManager : MonoBehaviour
     {
         if (_mainCamera == null)
         {
-            Debug.LogError("Main Camera is not assigned in InputManager!");
+            // It's possible Awake hasn't run yet if this is called too early from elsewhere
+            // or if Camera.main was not available.
+            _mainCamera = Camera.main; 
+            if(_mainCamera == null) {
+                 Debug.LogError("Main Camera is not assigned and Camera.main is null!");
+                 return Vector2.zero;
+            }
+        }
+        if (_playerControls == null) { // Extra safety
+            Debug.LogError("InputManager: GetPointerPositionInWorld called but _playerControls is null!");
             return Vector2.zero;
         }
 
