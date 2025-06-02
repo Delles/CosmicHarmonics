@@ -199,13 +199,72 @@
 -   **Prefab Creation:**
     -   Created a prefab from `Seed_Prototype` by dragging it into `Assets/_Project/Prefabs/Characters/`.
     -   The instance in the scene (`Seed_Prototype`) was kept for direct testing with `InputManager`.
--   **Testing & Verification:**
+-   -   **Testing & Verification:**
     -   Confirmed in Play mode:
         -   The `Seed_Prototype` GameObject is launched when the mouse is flicked.
         -   The direction and force of the launch correspond to the flick gesture.
         -   The seed moves according to 2D physics and does not fall due to global gravity (Y=0).
+        -   _(Note: Without any drag implemented at this stage, the seed will continue moving indefinitely if unobstructed)._
         -   Repeated flicks correctly reset and relaunch the seed from the new flick start position.
         -   The `isKinematic` obsolete warning was resolved by using `rb.bodyType`.
         -   Previous `NullReferenceException`s in `InputManager` were resolved, and `_playerControls` initializes and functions correctly.
+
+---
+
+---
+
+### 8. Gravity Well (Star - Basic) Implementation
+
+-   **Sprite Creation for Star:**
+
+    -   Utilized Unity's built-in `Hexagon - Point Top` 2D Sprite.
+    -   Asset named `Star_Sprite` (or similar), located in `Assets/_Project/Sprites/Gameplay/`.
+    -   Default Sprite Importer Settings for `Hexagon - Point Top`:
+        -   Texture Type: `Sprite (2D and UI)`
+        -   Sprite Mode: `Multiple`
+        -   Pixels Per Unit: `256`
+
+-   **Star GameObject (`Star_GravityWell`):**
+
+    -   A 2D Sprite GameObject, `Star_GravityWell`, was created in the scene.
+    -   The `Star_Sprite` (Hexagon - Point Top) was assigned to its `Sprite Renderer`.
+    -   `Sprite Renderer` Color: Configured to a yellowish hue.
+    -   Initial Transform: Positioned strategically in the scene (e.g., `(X: 3, Y: 2, Z: 0)`).
+
+-   **Physics Components on `Star_GravityWell`:**
+
+    -   **`Circle Collider 2D`:**
+        -   `Is Trigger`: Enabled.
+        -   `Radius`: Set to define the gravitational influence range (e.g., `3` or `5` units), intended to be synced with `effectRadius` in the `GravityWell_Star` script.
+
+-   **`GravityWell_Star.cs` Script:**
+
+    -   Script created in `Assets/_Project/Scripts/Gameplay/` and attached to `Star_GravityWell`.
+    -   `[RequireComponent(typeof(CircleCollider2D))]` attribute included.
+    -   **Key Public Properties:**
+        -   `gravityStrength`: Float, controls the magnitude of the gravitational pull (e.g., `50f`).
+        -   `effectRadius`: Float, defines the range of gravitational effect (e.g., `5f`).
+    -   **Core Logic:**
+        -   `Awake()`: Caches `CircleCollider2D`, ensures it's a trigger, and initializes `_effectCollider.radius` from `effectRadius`.
+        -   `FixedUpdate()`: Iterates through `affectedRigidbodies`. Applies a force towards the star on each seed within range using `rb.AddForce(directionToWell * gravityStrength, ForceMode2D.Force)`. Includes logic to clean up null/inactive rigidbodies.
+        -   `OnTriggerEnter2D()`: Detects GameObjects tagged "Seed" entering the trigger, adding their `Rigidbody2D` to `affectedRigidbodies`.
+        -   `OnTriggerExit2D()`: Detects GameObjects tagged "Seed" exiting the trigger, removing their `Rigidbody2D` from `affectedRigidbodies`.
+        -   `OnDrawGizmosSelected()`: Provides editor visualization of `effectRadius`.
+        -   `OnValidate()`: Attempts to synchronize `_effectCollider.radius` with `effectRadius` for editor-time changes.
+
+-   **Seed Prefab Tagging:**
+
+    -   The `Seed_Prototype` prefab and its scene instances were assigned the tag "Seed".
+
+-   **Configuration & Prefab Creation:**
+
+    -   `Gravity Strength` and `Effect Radius` values were configured on the `Star_GravityWell` instance.
+    -   A prefab of `Star_GravityWell` was created and stored in `Assets/_Project/Prefabs/Environment/`.
+
+-   **Testing & Verification:**
+    -   Functional Test: Seeds flicked within the `effectRadius` of the `Star_GravityWell` are observably pulled towards its center.
+    -   Debugging: Console logs confirm seed entry and exit from the star's trigger zone.
+    -   Behavioral Observation: Initial interactions (capture, orbit attempts, sling-shots) between flicked seeds and the gravity well were noted.
+    -   _(Note on Live Editing: Current script version may require a stop/play cycle for Inspector changes to `gravityStrength` and `effectRadius` to reliably update the physics simulation during Play mode)._
 
 ---
