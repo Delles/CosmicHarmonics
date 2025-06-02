@@ -268,3 +268,75 @@
     -   _(Note on Live Editing: Current script version may require a stop/play cycle for Inspector changes to `gravityStrength` and `effectRadius` to reliably update the physics simulation during Play mode)._
 
 ---
+
+---
+
+---
+
+### 9. Stability Zone (Basic) Implementation
+
+-   **Goal:** Create a zone where seeds can detect entry/exit and become "stable" if they remain quasi-stationary for a set duration.
+-   **Sprite & GameObject:**
+    -   Created a `StabilityZone_Sprite` (e.g., using Unity's built-in Square sprite) in `Assets/_Project/Sprites/Gameplay/`.
+    -   Created a 2D Sprite GameObject `StabilityZone_Prototype` in the scene under `// -- ENVIRONMENT --`.
+    -   Assigned the sprite and a distinct color (e.g., light blue, semi-transparent).
+    -   Positioned and scaled for testing.
+-   **Collider:**
+    -   Added a `BoxCollider2D` (or `CircleCollider2D` depending on sprite choice) to `StabilityZone_Prototype`.
+    -   Collider size adjusted to match visuals.
+    -   **`Is Trigger` enabled.**
+-   **`StabilityZone.cs` Script:**
+    -   Created `StabilityZone.cs` in `Assets/_Project/Scripts/Gameplay/` and attached to `StabilityZone_Prototype`.
+    -   `Awake()`: Caches `SpriteRenderer`.
+    -   `OnTriggerEnter2D(Collider2D other)`:
+        -   Checks for "Seed" tag.
+        -   Gets `SeedController` from the seed.
+        -   Calls `seed.EnterStabilityZone(this)`.
+        -   Changes zone's `SpriteRenderer` color for feedback (e.g., to an "active" color).
+        -   Logs entry.
+    -   `OnTriggerExit2D(Collider2D other)`:
+        -   Checks for "Seed" tag.
+        -   Gets `SeedController` from the seed.
+        -   Calls `seed.ExitStabilityZone(this)`.
+        -   Reverts zone's `SpriteRenderer` color (e.g., to an "inactive" color).
+        -   Logs exit.
+    -   `OnDrawGizmos()`: Added to visualize the zone's collider in the editor.
+-   **`SeedController.cs` Modifications:**
+    -   **New Properties:**
+        -   `stabilizationTimeRequired` (float, e.g., 2f): Time needed to become stable.
+        -   `quasiStationaryVelocityThreshold` (float, e.g., 0.1f): Max velocity to be considered for stabilization.
+        -   `flyingColor`, `stabilizingColor`, `stableColor`: For visual feedback.
+    -   **State Variables:**
+        -   `_currentStabilityZone` (StabilityZone)
+        -   `_stabilizationTimer` (float)
+        -   `_isStabilizing` (bool)
+        -   `_isStable` (bool)
+        -   `_isInStabilityZone` (bool)
+    -   `Awake()`: Caches `SpriteRenderer`.
+    -   `EnterStabilityZone(StabilityZone zone)`:
+        -   Sets `_isInStabilityZone = true`, `_currentStabilityZone = zone`.
+        -   Resets `_stabilizationTimer` and `_isStabilizing`.
+    -   `ExitStabilityZone(StabilityZone zone)`:
+        -   Sets `_isInStabilityZone = false`, `_currentStabilityZone = null`.
+        -   Resets `_isStabilizing`, `_stabilizationTimer`.
+        -   Reverts color if not stable.
+    -   `Update()` (or `FixedUpdate()`):
+        -   If `_isLaunched`, `!_isStable`, `_isInStabilityZone`:
+            -   Checks if `_rb.velocity.magnitude < quasiStationaryVelocityThreshold`.
+            -   If true: starts/continues `_stabilizationTimer`, sets `_isStabilizing = true`, changes color to `stabilizingColor`.
+            -   If timer exceeds `stabilizationTimeRequired`: sets `_isStable = true`, changes color to `stableColor`, logs stability.
+            -   If false (moved too fast): resets `_stabilizationTimer`, `_isStabilizing = false`, reverts color.
+    -   `ResetSeed(Vector2 startPosition)`: Updated to reset all new stabilization state variables (`_isStabilizing`, `_isStable`, `_isInStabilityZone`, `_currentStabilityZone`, `_stabilizationTimer`) and color.
+    -   `Launch(Vector2 flickVector)`: Prevents launch if `_isStable`. Sets seed color to `flyingColor`.
+-   **Seed Tagging:** Ensured `Seed_Prototype` prefab is tagged "Seed".
+-   **Testing & Verification:**
+    -   Flicked seed into the zone. Observed console logs for entry/exit.
+    -   Observed zone color changes on seed entry/exit.
+    -   Manually placed seed in the zone (or flicked very gently) to test stabilization:
+        -   Seed color changed to `stabilizingColor` when quasi-stationary.
+        -   After `stabilizationTimeRequired`, seed color changed to `stableColor` and "STABLE" message logged.
+    -   Tested moving the seed out of the zone while stabilizing (stabilization stops/resets).
+    -   Tested moving the seed too fast within the zone (stabilization timer resets).
+    -   _(Note: Initial tests for making the seed stop used temporary `Linear Damping` on the Seed's Rigidbody2D. This was reverted to 0 after confirming basic zone logic, as permanent damping affects other interactions like gravity well capture too much. The method for how seeds naturally slow down in stability zones will be revisited.)_
+
+---
