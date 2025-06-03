@@ -340,3 +340,56 @@
     -   _(Note: Initial tests for making the seed stop used temporary `Linear Damping` on the Seed's Rigidbody2D. This was reverted to 0 after confirming basic zone logic, as permanent damping affects other interactions like gravity well capture too much. The method for how seeds naturally slow down in stability zones will be revisited.)_
 
 ---
+
+---
+
+### 10. Basic Level Manager & Gameplay Loop
+
+-   **Goal:** Implement a `LevelManager` to control a basic level setup, manage a single seed's lifecycle (spawn, launch, stabilization), check for a win condition, and handle reset conditions.
+-   **`LevelManager.cs` Script:**
+    -   Created `LevelManager.cs` in `Assets/_Project/Scripts/Gameplay/`.
+    -   Implemented Singleton pattern (`LevelManager.Instance`).
+    -   **Responsibilities:**
+        -   Spawns a Star, Stability Zone, and one Seed from assigned prefabs at configured positions (`initialSeedPosition`, `starSpawnPosition`, `stabilityZoneSpawnPosition`). Scales the Stability Zone.
+        -   Caches `Camera.main`.
+        -   The active seed is initially `Kinematic` and follows the mouse cursor for aiming (`UpdateActiveSeedAimPosition` called by `InputManager`).
+        -   `RequestLaunchActiveSeed(flickStart, flickEnd)`: Called by `InputManager`. Launches the active seed if it's ready (not already launched/stable). Further flicks on a launched/stable seed are ignored.
+        -   Subscribes to `_activeSeed.OnSeedStabilized` and `_activeSeed.OnSeedLaunched` events.
+        -   `HandleSeedStabilized()`: Sets `_levelCompleted = true` and logs "LEVEL COMPLETE!" when the active seed stabilizes.
+        -   `CheckSeedOutOfBounds()`: Called in `Update()`. If a launched, non-stable seed goes outside camera viewport (with a buffer), it resets the seed to `initialSeedPosition` (ready for aiming).
+        -   `RequestManualReset()`: Public method to reset the active seed to `initialSeedPosition` (and `_levelCompleted` to false). Can be triggered by `InputManager`.
+        -   `ResetLevel()`: Clears spawned level objects (Stars, Zones, Seed using `FindObjectsByType`) and re-runs `SetupLevel()`.
+-   **`SeedController.cs` Modifications:**
+    -   Added `IsReadyForAiming` public property.
+    -   Added `PrepareForAiming(Vector2 initialPosition)`: Sets seed to `Kinematic`, resets state, positions it.
+    -   Added `UpdateAimPosition(Vector2 worldPosition)`: Updates transform position if `IsReadyForAiming`.
+    -   `Launch()`: Sets Rigidbody to `Dynamic`, applies force, sets `_isLaunched = true`. Ensures `drag` is set to `defaultDrag`.
+    -   `ResetSeed(Vector2 startPosition)`: Now calls `PrepareForAiming()`.
+    -   Added `defaultDrag` and `dragInStabilityZone` serialized fields.
+    -   `Awake()`: Sets `_rb.drag = defaultDrag`.
+    -   `EnterStabilityZone()`: Sets `_rb.drag = dragInStabilityZone` if seed is `Dynamic`.
+    -   `ExitStabilityZone()`: Reverts `_rb.drag = defaultDrag` if seed is `Dynamic`.
+    -   Seed prefab default `Rigidbody2D.bodyType` set to `Kinematic`.
+-   **`InputManager.cs` Modifications:**
+    -   `Update()`: If not flicking and an aimable seed exists, calls `LevelManager.Instance.UpdateActiveSeedAimPosition()`.
+    -   `OnFlickPressStarted()`: Checks if seed is ready for launch before setting `IsFlicking = true`.
+    -   `OnFlickPressCanceled()`: Calls `LevelManager.Instance.RequestLaunchActiveSeed()`.
+    -   Added `ResetAction` (mapped to Right Mouse Button) to `PlayerControls.inputactions`.
+    -   Added `OnResetActionPerformed()`: Calls `LevelManager.Instance.RequestManualReset()` when `ResetAction` is performed.
+-   **Scene Integration:**
+    -   Removed manually placed Star, Zone, and Seed from the scene.
+    -   Created `LevelManager` GameObject and attached the script.
+    -   Assigned necessary prefabs (Seed, Star, Stability Zone) to `LevelManager` in the Inspector.
+    -   Configured `initialSeedPosition` and other spawn points/scales.
+-   **Testing & Verification:**
+    -   Level objects (Star, Zone, Seed) spawn correctly.
+    -   Seed follows mouse cursor before launch.
+    -   Seed launches from mouse click position.
+    -   Seed physics (gravity, drag in zone) and stabilization work as expected.
+    -   "LEVEL COMPLETE!" message appears on stabilization.
+    -   Flicking again after launch/stabilization is ignored for the active seed.
+    -   Seed resets to initial aimable position if it goes off-screen.
+    -   Right-clicking resets the seed to initial aimable position (and level complete status).
+    -   Deprecated `FindObjectsOfType<T>()` updated to `FindObjectsByType<T>(FindObjectsSortMode.None)` in `LevelManager.ResetLevel()`.
+
+---

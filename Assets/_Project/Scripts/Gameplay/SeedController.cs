@@ -1,5 +1,5 @@
 using UnityEngine;
-
+using System; // For Action
 
 [RequireComponent(typeof(Rigidbody2D))]
 [RequireComponent(typeof(CircleCollider2D))]
@@ -12,10 +12,18 @@ public class SeedController : MonoBehaviour
     public float stabilizationTimeRequired = 2f; // Time in seconds to become stable
     public float quasiStationaryVelocityThreshold = 0.1f; // Max velocity magnitude to be considered "quasi-stationary"
 
+    [Header("Physics Settings")]
+    [SerializeField] private float defaultDrag = 0.1f; // Base drag when not in a stability zone (can be 0)
+    [SerializeField] private float dragInStabilityZone = 2f; // Increased drag when inside a zone
+
     [Header("State Feedback (Temporary)")]
     public Color flyingColor = Color.white;
     public Color stabilizingColor = Color.yellow;
     public Color stableColor = Color.green;
+
+    // New public events
+    public event Action<SeedController> OnSeedStabilized;
+    public event Action<SeedController> OnSeedLaunched; // To notify when Launch() is called
 
     private Rigidbody2D _rb;
     private SpriteRenderer _spriteRenderer;
@@ -26,6 +34,12 @@ public class SeedController : MonoBehaviour
     private bool _isStabilizing = false;
     private bool _isStable = false;
     private bool _isInStabilityZone = false; // More explicit flag
+
+    // Public getters for state access
+    public bool IsLaunched => _isLaunched;
+    public bool IsStable => _isStable;
+    // NEW: Add a property to check if the seed is ready for aiming/positioning by mouse
+    public bool IsReadyForAiming => !_isLaunched && !_isStable && (_rb != null && _rb.bodyType == RigidbodyType2D.Kinematic);
 
     void Awake()
     {
@@ -40,6 +54,10 @@ public class SeedController : MonoBehaviour
             Debug.LogError("SeedController requires a SpriteRenderer component.", this);
         }
         
+        if (_rb != null)
+        {
+            _rb.linearDamping = defaultDrag; // Set initial drag
+        }
         SetColor(flyingColor); // Initial color
     }
 
@@ -62,14 +80,18 @@ public class SeedController : MonoBehaviour
 
                 if (_stabilizationTimer >= stabilizationTimeRequired)
                 {
-                    _isStable = true;
-                    _isStabilizing = false; // No longer "stabilizing", it IS stable
-                    Debug.Log($"{name} HAS BECOME STABLE in {_currentStabilityZone.name}!", this);
-                    SetColor(stableColor);
-                    // Here you would typically notify a LevelManager or trigger other game events
-                    // For now, we just log it and change color.
-                    // Optionally, make the Rigidbody kinematic once stable
-                    // _rb.bodyType = RigidbodyType2D.Kinematic; 
+                    if (!_isStable) // Only invoke if changing state to stable
+                    {
+                        _isStable = true;
+                        _isStabilizing = false; // No longer "stabilizing", it IS stable
+                        Debug.Log($"{name} HAS BECOME STABLE in {_currentStabilityZone.name}!", this);
+                        SetColor(stableColor);
+                        OnSeedStabilized?.Invoke(this); // Invoke the event
+                        // Here you would typically notify a LevelManager or trigger other game events
+                        // For now, we just log it and change color.
+                        // Optionally, make the Rigidbody kinematic once stable
+                        // _rb.bodyType = RigidbodyType2D.Kinematic; 
+                    }
                 }
             }
             else
@@ -93,38 +115,69 @@ public class SeedController : MonoBehaviour
         }
     }
 
+    // NEW Method: Called by LevelManager to prepare the seed for mouse aiming
+    public void PrepareForAiming(Vector2 initialPosition)
+    {
+        transform.position = initialPosition;
+        if (_rb == null) _rb = GetComponent<Rigidbody2D>();
+        if (_rb != null)
+        {
+            _rb.bodyType = RigidbodyType2D.Kinematic; // Make it kinematic
+            _rb.linearVelocity = Vector2.zero;
+            _rb.angularVelocity = 0f;
+            _rb.linearDamping = defaultDrag; // Ensure drag is reset if it was previously in a zone
+        }
+        
+        _isLaunched = false;
+        _isStable = false;
+        _isStabilizing = false;
+        _isInStabilityZone = false;
+        _stabilizationTimer = 0f;
+        _currentStabilityZone = null;
+        SetColor(flyingColor); // Or a specific "aiming" color
+        Debug.Log($"{name} prepared for aiming at {initialPosition}.", this);
+    }
+
+    // NEW Method: To update position while aiming (kinematic)
+    public void UpdateAimPosition(Vector2 worldPosition)
+    {
+        if (IsReadyForAiming) // Only move if kinematic and ready for aiming
+        {
+            transform.position = worldPosition;
+        }
+    }
+
     // Public method to launch the seed
     // Expects a world-space direction and magnitude for the flick
     public void Launch(Vector2 flickVector)
     {
-        if (_isLaunched && !_isStable) // Allow re-launch if not stable? Or always reset first?
+        if (_isStable) // Don't launch if already stable
         {
-            // For now, let's assume ResetSeed is called before any new launch.
-            // If you want to re-launch an already flying seed, this logic might need adjustment.
-            Debug.LogWarning($"{name} is already launched. Reset before launching again.", this);
-            // return; // Or, reset and launch: ResetSeed(transform.position);
-        }
-        if (_isStable)
-        {
-            Debug.Log($"{name} is stable and cannot be launched. Reset first.", this);
+            Debug.Log("SeedController: Seed is stable, cannot launch.");
             return;
         }
 
-        if (_rb != null)
+        if (_rb == null)
         {
-            if (_rb.bodyType == RigidbodyType2D.Kinematic) // Only change if it's currently Kinematic
-            {
-                _rb.bodyType = RigidbodyType2D.Dynamic;
-            }
-            _rb.AddForce(flickVector * launchForceMultiplier, ForceMode2D.Impulse);
-            _isLaunched = true;
-            SetColor(flyingColor); // Set color on launch
-            Debug.Log($"{name} launched with vector {flickVector} and force multiplier {launchForceMultiplier}. Velocity: {_rb.linearVelocity}", this);
+            Debug.LogError("SeedController: Rigidbody2D is null in Launch. Caching again.");
+            _rb = GetComponent<Rigidbody2D>();
+            if (_rb == null) return; // Still null, can't proceed
         }
-        else
-        {
-            Debug.LogError("Cannot launch seed: Rigidbody2D is missing.", this);
-        }
+        
+        _rb.bodyType = RigidbodyType2D.Dynamic; // Make it Dynamic to react to forces
+        // Ensure drag is set to default when launched, in case it was in a zone and reset kinematically
+        _rb.linearDamping = defaultDrag;
+        _rb.AddForce(flickVector * launchForceMultiplier, ForceMode2D.Impulse);
+        
+        _isLaunched = true; // Now it's officially launched
+        _isStable = false; // Ensure it's not stable when launched
+        _isStabilizing = false; // Reset stabilizing state on new launch
+        _stabilizationTimer = 0f; // Reset timer on new launch
+
+        SetColor(flyingColor); // Set color on launch
+        Debug.Log($"{name} launched with vector {flickVector} and force multiplier {launchForceMultiplier}. Velocity: {_rb.linearVelocity}", this);
+        
+        OnSeedLaunched?.Invoke(this); // Invoke the new event
     }
 
     public void EnterStabilityZone(StabilityZone zone)
@@ -134,6 +187,12 @@ public class SeedController : MonoBehaviour
         _currentStabilityZone = zone;
         _isStabilizing = false; // Reset stabilizing flag, will be re-evaluated in Update/FixedUpdate
         _stabilizationTimer = 0f; // Reset timer on entering a new zone or re-entering
+
+        if (_rb != null && _rb.bodyType == RigidbodyType2D.Dynamic) // Only apply drag change if dynamic
+        {
+            _rb.linearDamping = dragInStabilityZone;
+            Debug.Log($"{name} drag increased to {dragInStabilityZone} in zone.", this);
+        }
     }
 
     public void ExitStabilityZone(StabilityZone zone)
@@ -146,6 +205,13 @@ public class SeedController : MonoBehaviour
             _currentStabilityZone = null;
             _isStabilizing = false;
             _stabilizationTimer = 0f;
+
+            if (_rb != null && _rb.bodyType == RigidbodyType2D.Dynamic) // Only revert drag if dynamic
+            {
+                _rb.linearDamping = defaultDrag;
+                Debug.Log($"{name} drag reverted to {defaultDrag} after exiting zone.", this);
+            }
+
             if (!_isStable) // If it wasn't stable, revert color
             {
                 SetColor(flyingColor);
@@ -160,22 +226,11 @@ public class SeedController : MonoBehaviour
     // Example of resetting the seed (useful for a spawner or restart)
     public void ResetSeed(Vector2 startPosition)
     {
-        if (_rb == null) _rb = GetComponent<Rigidbody2D>(); // Ensure rb is assigned
-
-        _rb.bodyType = RigidbodyType2D.Dynamic; // Ensure it's dynamic for launch
-        _rb.linearVelocity = Vector2.zero;
-        _rb.angularVelocity = 0f;
-        transform.position = startPosition;
-
-        _isLaunched = false;
-        _isStabilizing = false;
-        _isStable = false;
-        _isInStabilityZone = false;
-        _currentStabilityZone = null;
-        _stabilizationTimer = 0f;
-
-        SetColor(flyingColor); // Reset to default flying color
-        Debug.Log($"{name} has been reset at {startPosition}.", this);
+        // Ensure drag is set to default here too, as it calls PrepareForAiming
+        if (_rb != null) _rb.linearDamping = defaultDrag;
+        // This effectively calls PrepareForAiming
+        PrepareForAiming(startPosition);
+        Debug.Log($"{name} has been reset at {startPosition} and is ready for aiming. Drag set to {defaultDrag}.", this);
     }
 
     private void SetColor(Color newColor)

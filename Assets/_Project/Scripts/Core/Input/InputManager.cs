@@ -1,26 +1,22 @@
-using UnityEngine; 
-using UnityEngine.InputSystem; // Import the new Input System namespace
+using UnityEngine;
+using UnityEngine.InputSystem;
 
 public class InputManager : MonoBehaviour
 {
-    public static InputManager Instance { get; private set; } // Singleton instance
-
-    private PlayerControls _playerControls;
-    private Camera _mainCamera;
-
-    public SeedController testSeedToLaunch; // Assign this in the Inspector
+    public static InputManager Instance { get; private set; }
 
     public Vector2 FlickStartPosition { get; private set; }
     public Vector2 FlickEndPosition { get; private set; }
     public bool IsFlicking { get; private set; }
 
-    // Optional: Events for other systems to subscribe to
-    public event System.Action<Vector2> OnFlickStart; // Parameter: World start position
-    public event System.Action<Vector2, Vector2> OnFlickEnd; // Parameters: World start position, World end position
+    public event System.Action<Vector2> OnFlickStart;
+    public event System.Action<Vector2, Vector2> OnFlickEnd; // World start, world end
 
-    private void Awake()
+    private PlayerControls _playerControls;
+    private Camera _mainCamera;
+
+    void Awake()
     {
-        // Singleton pattern
         if (Instance != null && Instance != this)
         {
             Destroy(gameObject);
@@ -28,46 +24,30 @@ public class InputManager : MonoBehaviour
         }
         Instance = this;
 
-        try
-        {
-            _playerControls = new PlayerControls();
-            if (_playerControls == null)
-            {
-                Debug.LogError("InputManager: _playerControls is NULL immediately after new PlayerControls()!", this);
-            }
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogError($"InputManager: Exception during new PlayerControls(): {e.Message}\n{e.StackTrace}", this);
-        }
-        
-        _mainCamera = Camera.main; // Cache the main camera
+        _playerControls = new PlayerControls();
+        _mainCamera = Camera.main;
+
         if (_mainCamera == null)
         {
-            Debug.LogWarning("InputManager: Camera.main is null in Awake(). Will retry later.", this);
+            Debug.LogError("InputManager: Main Camera not found! Ensure your camera is tagged 'MainCamera'.");
+        }
+    }
+
+    void Update()
+    {
+        if (!IsFlicking && LevelManager.Instance != null && LevelManager.Instance._activeSeed != null && LevelManager.Instance._activeSeed.IsReadyForAiming)
+        {
+            LevelManager.Instance.UpdateActiveSeedAimPosition(GetPointerPositionInWorld());
         }
     }
 
     private void OnEnable()
     {
-        if (_playerControls == null)
-        {
-            Debug.LogError("InputManager: _playerControls is NULL at the start of OnEnable()!", this);
-            return; // Exit OnEnable if _playerControls is null to prevent further errors
-        }
-
-        try
-        {
-            _playerControls.Gameplay.Enable();
-
-            // Subscribe to the actions
-            _playerControls.Gameplay.FlickPress.started += OnFlickPressStarted;
-            _playerControls.Gameplay.FlickPress.canceled += OnFlickPressCanceled; // Canceled usually means released
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogError($"InputManager: Exception during OnEnable(): {e.Message}\n{e.StackTrace}", this);
-        }
+        if (_playerControls == null) _playerControls = new PlayerControls();
+        _playerControls.Gameplay.Enable();
+        _playerControls.Gameplay.FlickPress.started += OnFlickPressStarted;
+        _playerControls.Gameplay.FlickPress.canceled += OnFlickPressCanceled;
+        _playerControls.Gameplay.ResetAction.performed += OnResetActionPerformed;
     }
 
     private void OnDisable()
@@ -76,96 +56,83 @@ public class InputManager : MonoBehaviour
         {
             _playerControls.Gameplay.FlickPress.started -= OnFlickPressStarted;
             _playerControls.Gameplay.FlickPress.canceled -= OnFlickPressCanceled;
+            _playerControls.Gameplay.ResetAction.performed -= OnResetActionPerformed;
             _playerControls.Gameplay.Disable();
         }
     }
 
     private void OnFlickPressStarted(InputAction.CallbackContext context)
     {
-        if (_playerControls == null) { // Extra safety
-            Debug.LogError("InputManager: OnFlickPressStarted called but _playerControls is null!");
-            return;
-        }
-        IsFlicking = true;
-        // Read the pointer position AT THE START of the flick
-        FlickStartPosition = GetPointerPositionInWorld();
-        OnFlickStart?.Invoke(FlickStartPosition);
+        if (_mainCamera == null) return;
 
-        // For debugging:
-        Debug.Log($"Flick Started at Screen: {_playerControls.Gameplay.PointerPosition.ReadValue<Vector2>()}, World: {FlickStartPosition}");
+        if (LevelManager.Instance != null && LevelManager.Instance._activeSeed != null &&
+            !LevelManager.Instance._activeSeed.IsLaunched && !LevelManager.Instance._activeSeed.IsStable)
+        {
+            IsFlicking = true;
+            FlickStartPosition = GetPointerPositionInWorld();
+            OnFlickStart?.Invoke(FlickStartPosition);
+            Debug.Log($"InputManager: Flick Started. Seed is at World: {FlickStartPosition}");
+        }
+        else
+        {
+            Debug.Log("InputManager: Flick attempt ignored, seed not ready or already processed.");
+        }
     }
 
     private void OnFlickPressCanceled(InputAction.CallbackContext context)
     {
-        if (_playerControls == null) { // Extra safety
-            Debug.LogError("InputManager: OnFlickPressCanceled called but _playerControls is null!");
+        if (!IsFlicking || _mainCamera == null)
+        {
+            if (IsFlicking) IsFlicking = false;
             return;
         }
-        if (IsFlicking) // Ensure we were actually flicking
+
+        IsFlicking = false;
+        FlickEndPosition = GetPointerPositionInWorld();
+        OnFlickEnd?.Invoke(FlickStartPosition, FlickEndPosition);
+
+        if (LevelManager.Instance != null)
         {
-            IsFlicking = false;
-            // Read the pointer position AT THE END of the flick
-            FlickEndPosition = GetPointerPositionInWorld();
-            OnFlickEnd?.Invoke(FlickStartPosition, FlickEndPosition); // Re-enabled this event
-
-            // For debugging:
-            Debug.Log($"Flick Ended at Screen: {_playerControls.Gameplay.PointerPosition.ReadValue<Vector2>()}, World: {FlickEndPosition}");
-            
-            Vector2 flickVector = FlickEndPosition - FlickStartPosition;
-            Debug.Log($"Flick Vector (World): {flickVector}");
-
-            // --- TEMPORARY CODE TO LAUNCH THE SEED ---
-            if (testSeedToLaunch != null)
+            if (LevelManager.Instance._activeSeed != null &&
+                !LevelManager.Instance._activeSeed.IsLaunched &&
+                !LevelManager.Instance._activeSeed.IsStable)
             {
-                // Optional: Reset the seed to the start position before launching
-                // This makes repeated testing easier from the same spot
-                testSeedToLaunch.transform.position = FlickStartPosition; 
-                testSeedToLaunch.ResetSeed(FlickStartPosition); // Reset its state and velocity
-
-                testSeedToLaunch.Launch(flickVector);
+                LevelManager.Instance.RequestLaunchActiveSeed(FlickStartPosition, FlickEndPosition);
             }
             else
             {
-                Debug.LogWarning("No Test Seed assigned to InputManager to launch.");
+                Debug.Log("InputManager: Flick cancelled, but seed state not appropriate for launch (already launched/stable).");
             }
-            // --- END OF TEMPORARY CODE ---
+        }
+        else
+        {
+            Debug.LogError("InputManager: LevelManager.Instance is null. Cannot request seed launch.");
         }
     }
 
-    // Public method to get the current pointer position in world space
+    private void OnResetActionPerformed(InputAction.CallbackContext context)
+    {
+        Debug.Log("InputManager: Reset Action Performed (Right Mouse Click).");
+        if (LevelManager.Instance != null)
+        {
+            LevelManager.Instance.RequestManualReset();
+        }
+        else
+        {
+            Debug.LogError("InputManager: LevelManager.Instance is null. Cannot request manual reset.");
+        }
+    }
+
     public Vector2 GetPointerPositionInWorld()
     {
-        if (_mainCamera == null)
+        if (_mainCamera == null || _playerControls == null)
         {
-            // It's possible Awake hasn't run yet if this is called too early from elsewhere
-            // or if Camera.main was not available.
-            _mainCamera = Camera.main; 
-            if(_mainCamera == null) {
-                 Debug.LogError("Main Camera is not assigned and Camera.main is null!");
-                 return Vector2.zero;
-            }
-        }
-        if (_playerControls == null) { // Extra safety
-            Debug.LogError("InputManager: GetPointerPositionInWorld called but _playerControls is null!");
+            Debug.LogError("InputManager: MainCamera or PlayerControls not initialized in GetPointerPositionInWorld.");
             return Vector2.zero;
         }
-
-        Vector2 screenPosition = _playerControls.Gameplay.PointerPosition.ReadValue<Vector2>();
-        Vector3 worldPosition = _mainCamera.ScreenToWorldPoint(new Vector3(screenPosition.x, screenPosition.y, _mainCamera.nearClipPlane));
-        
-        // For a 2D orthographic camera, you might want to ensure Z is 0, 
-        // or whatever your gameplay plane is. Since ScreenToWorldPoint gives a Z based on nearClipPlane
-        // for an orthographic camera, and our gameplay elements are likely at Z=0:
-        return new Vector2(worldPosition.x, worldPosition.y);
+        Vector3 screenPos = _playerControls.Gameplay.PointerPosition.ReadValue<Vector2>();
+        screenPos.z = -_mainCamera.transform.position.z; // Set z to distance from camera to world plane
+        Vector3 worldPos = _mainCamera.ScreenToWorldPoint(screenPos);
+        return new Vector2(worldPos.x, worldPos.y);
     }
-
-    // Example of how another script might access the flick data (if not using events)
-    // public Vector2 GetFlickVectorWorld()
-    // {
-    //     if (!IsFlicking && FlickEndPosition != Vector2.zero) // Check if a flick just ended
-    //     {
-    //         return FlickEndPosition - FlickStartPosition;
-    //     }
-    //     return Vector2.zero;
-    // }
 }

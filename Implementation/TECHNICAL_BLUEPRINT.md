@@ -61,7 +61,7 @@
 
 ### 2. Tech Stack
 
--   **Core Engine:** Unity 2022.3.x LTS (or latest stable LTS version).
+-   **Core Engine:** Unity 6 (6000.0.4f1).
 -   **Programming Language:** C#.
 -   **Render Pipeline:** Universal Render Pipeline (URP), configured for 2D. This allows for efficient 2D lighting, particle effects, and post-processing suitable for the "glowing," "bloom" aesthetic.
 -   **Key Unity Packages:**
@@ -106,6 +106,7 @@
 ### 3. Game Flow & Architecture Diagram
 
 -   **High‑Level Game Flowchart:**
+
     ```mermaid
     graph TD
         A[Start Game] --> B{Splash Screens};
@@ -136,6 +137,7 @@
         N -- Main Menu --> C;
 
     ```
+
 -   **System Architecture Diagram:**
     -   **Key Systems/Managers:**
         -   `GameManager` (or `GameStateManager`): Overall game state (Menu, Playing, Paused), scene loading, persistent data.
@@ -188,6 +190,7 @@
 ### 4. Project Rules
 
 -   **Development Best Practices & Coding Standards:**
+
     -   **C# Naming Conventions:**
         -   `PascalCase` for classes, enums, methods, properties, events, public fields.
         -   `camelCase` for local variables, private/protected fields.
@@ -202,6 +205,7 @@
     -   **Scene Hierarchy:** Use empty GameObjects as folders for organization (e.g., `_Managers`, `_Environment`, `_DynamicObjects`, `_UI`). Name objects clearly and consistently.
     -   **Prefab Organization:** Maintain a clear structure for prefabs. Name them descriptively (e.g., `Seed_Transformable_TypeA_Prefab`, `FX_StabilizationPulse_Prefab`).
     -   **Folder Structure (within `Assets`):**
+
         ```
         Assets/
         ├── _Project/
@@ -237,7 +241,9 @@
         └── StreamingAssets/ (For data needed at runtime that shouldn't be in Resources)
 
         ```
+
 -   **Version Control & Branching Strategy:**
+
     -   **Git + LFS:** Mandatory. Initialize LFS for common binary file types (`.png`, `.jpg`, `.wav`, `.mp3`, `.asset`).
     -   **Branching Model:** For a solo developer, a simplified model:
         -   `main` (or `master`): Always stable, releasable state.
@@ -250,6 +256,7 @@
         -   Optional body for more details.
         -   Commit frequently with small, logical changes.
     -   **.gitignore Setup:** Crucial for Unity projects. (Security Checklist Point 4)
+
         ```
         # Unity specific
         /[Ll]ibrary/
@@ -303,6 +310,7 @@
         crashlytics-build.properties
 
         ```
+
 -   **Testing & QA Strategy:**
     -   **Unit Testing:** Use Unity Test Runner for critical, non-MonoBehaviour logic (e.g., physics calculations if custom, data validation).
     -   **Playtesting:**
@@ -510,8 +518,11 @@
 ### 8. Optimised Unity C# & Performance Guidelines
 
 -   **C# Best Practices in Unity:**
+
     -   **Caching References:**
+
         -   In `Awake()` or `Start()`, get and store references to frequently accessed components or GameObjects:
+
             ```csharp
             // Bad:
             // void Update() { GetComponent<Rigidbody2D>().velocity = Vector2.zero; }
@@ -522,7 +533,9 @@
             void Update() { if (rb != null) rb.velocity = Vector2.zero; }
 
             ```
+
         -   Avoid `Camera.main` in `Update()`; cache it if used repeatedly.
+
     -   **Minimize Allocations (Reduce Garbage Collection):**
         -   **Strings:** Avoid string concatenations (`+` or `string.Format`) in loops or `Update()`. Use `StringBuilder` if complex string manipulation is needed.
         -   **`new` keyword:** Avoid unnecessary `new List<T>()`, `new GameObject()`, etc., in `Update()` or other frequent calls. Use object pooling.
@@ -532,20 +545,26 @@
         -   Use `struct` for small, data-only types that don't need reference semantics or inheritance. Can help avoid heap allocations if used appropriately (e.g., passing by value, local variables).
         -   Be mindful of copying costs if structs are large.
     -   **Coroutines:**
+
         -   `yield return null;` (waits one frame, no allocation).
         -   `yield return new WaitForSeconds(duration);` allocates memory. For repeated identical waits, cache the `WaitForSeconds` object:
+
             ```csharp
             WaitForSeconds waitOneSecond;
             void Start() { waitOneSecond = new WaitForSeconds(1f); }
             IEnumerator MyCoroutine() { yield return waitOneSecond; }
 
             ```
+
         -   For frequent, short custom delays, consider manual timer in `Update()` instead of many short-lived coroutines.
+
     -   **Unity Event Functions (`Update`, `FixedUpdate`, `LateUpdate`, etc.):**
         -   Understand their execution order.
         -   Keep logic in them concise. Offload heavy computations to coroutines or event-driven updates.
         -   Empty Unity event functions (e.g., an empty `Update()`) have a small overhead; remove if not used.
+
 -   **Common Unity Performance Pitfalls & Solutions:**
+
     -   **Physics (2D):**
         -   **Colliders:** Use simple primitive colliders (`CircleCollider2D`, `BoxCollider2D`) over `PolygonCollider2D` where possible. Avoid `MeshCollider` for dynamic 2D objects.
         -   **Rigidbody Settings:** Ensure `Rigidbody2D.SleepMode` is `StartAwake` (default) or `StartAsleep` to allow bodies to sleep when not moving, saving CPU.
@@ -559,20 +578,26 @@
         -   **Static Batching:** For non-moving geometry, mark as static to allow engine batching.
     -   **Large MonoBehaviours:** Decompose scripts with many responsibilities into smaller, focused components.
     -   **Memory Management:**
+
         -   **Event Unsubscription:** Always unsubscribe from C# events in `OnDestroy()` or `OnDisable()` to prevent memory leaks from orphaned references.
+
             ```csharp
             void OnEnable() { SomeManager.OnSomeEvent += HandleSomeEvent; }
             void OnDisable() { SomeManager.OnSomeEvent -= HandleSomeEvent; }
 
             ```
+
         -   **Static Collections:** Be very careful with static lists/dictionaries. Ensure they are cleared or items are removed when no longer needed, as they persist for the application's lifetime.
         -   **Texture/Audio Import Settings:** Large uncompressed assets consume significant memory. Use appropriate compression.
+
 -   **Profiling & Optimization Tools:**
     -   **Unity Profiler:** Essential. Profile CPU Usage (Deep Profile mode helps pinpoint expensive methods), GPU Usage, Memory (Simple and Detailed views), Rendering, Physics. Connect to builds for accurate device profiling.
     -   **Frame Debugger:** Analyzes individual draw calls, shader properties, render states. Helps identify why things aren't batching or why rendering is slow.
     -   **Platform-Specific Profilers:** (If issues persist on specific platforms) Xcode Instruments (iOS/macOS), Android Profiler (Android Studio), RenderDoc, PIX (Windows).
 -   **Code Snippets (Examples):**
+
     -   **Problematic (GetComponent in Update):**
+
         ```csharp
         // Inefficient if called frequently
         void Update() {
@@ -580,7 +605,9 @@
         }
 
         ```
+
     -   **Optimised (Cached Reference):**
+
         ```csharp
         SpriteRenderer spriteRenderer;
         void Awake() {
@@ -593,7 +620,9 @@
         }
 
         ```
+
     -   **Problematic (String concatenation in Update):**
+
         ```csharp
         // Generates garbage every frame
         public int score;
@@ -603,7 +632,9 @@
         }
 
         ```
+
     -   **Optimised (Update text only when score changes, or use StringBuilder for complex cases):**
+
         ```csharp
         public int score;
         private int _previousScore = -1;
@@ -616,6 +647,7 @@
         }
 
         ```
+
 -   **Structuring for Maintainability & Scalability:**
     -   **Namespaces:** Organize scripts into logical namespaces (e.g., `CosmicHarmonics.Core`, `CosmicHarmonics.Gameplay`, `CosmicHarmonics.UI`).
     -   **Interfaces:** Use interfaces to define contracts for behavior, promoting loose coupling (e.g., `IAffectableByGravity`, `ITransformable`).
