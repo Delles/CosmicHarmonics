@@ -14,6 +14,10 @@ public class InputManager : MonoBehaviour
 
     private PlayerControls _playerControls;
     private Camera _mainCamera;
+    
+    // To check if we are in a state where ESC should trigger return to menu
+    // i.e., game is running, not already on main menu, not on level complete screen
+    private bool _isGameCurrentlyPlaying = false;
 
     void Awake()
     {
@@ -35,7 +39,9 @@ public class InputManager : MonoBehaviour
 
     void Update()
     {
-        if (!IsFlicking && LevelManager.Instance != null && LevelManager.Instance._activeSeed != null && LevelManager.Instance._activeSeed.IsReadyForAiming)
+        if (!_isGameCurrentlyPlaying || IsFlicking || LevelManager.Instance == null || LevelManager.Instance._activeSeed == null) return;
+
+        if (LevelManager.Instance._activeSeed.IsReadyForAiming)
         {
             LevelManager.Instance.UpdateActiveSeedAimPosition(GetPointerPositionInWorld());
         }
@@ -48,6 +54,7 @@ public class InputManager : MonoBehaviour
         _playerControls.Gameplay.FlickPress.started += OnFlickPressStarted;
         _playerControls.Gameplay.FlickPress.canceled += OnFlickPressCanceled;
         _playerControls.Gameplay.ResetAction.performed += OnResetActionPerformed;
+        _playerControls.Gameplay.StopGame.performed += OnStopGamePerformed; // Subscribe to new action
     }
 
     private void OnDisable()
@@ -57,70 +64,84 @@ public class InputManager : MonoBehaviour
             _playerControls.Gameplay.FlickPress.started -= OnFlickPressStarted;
             _playerControls.Gameplay.FlickPress.canceled -= OnFlickPressCanceled;
             _playerControls.Gameplay.ResetAction.performed -= OnResetActionPerformed;
+            _playerControls.Gameplay.StopGame.performed -= OnStopGamePerformed; // Unsubscribe
             _playerControls.Gameplay.Disable();
+        }
+    }
+
+    // Method to be called by LevelManager when game starts/stops
+    public void SetGamePlayingState(bool isPlaying)
+    {
+        _isGameCurrentlyPlaying = isPlaying;
+    }
+
+    private void OnStopGamePerformed(InputAction.CallbackContext context)
+    {
+        Debug.Log("StopGame Action Performed (ESC pressed). Is game currently playing: " + _isGameCurrentlyPlaying);
+        // We only want ESC to return to menu if:
+        // 1. The game is actually considered "playing" (not on main menu already)
+        // 2. The level complete panel is NOT showing (as it has its own menu button and pauses game)
+        
+        // Check if LevelManager exists and if the level is complete.
+        // A simpler check: if Time.timeScale is already 0, we might be on a menu.
+        if (Time.timeScale == 0f) 
+        {
+            // Game is likely already paused by Main Menu or Level Complete screen.
+            // Let their UI buttons handle the logic.
+            // Or, if on LevelCompletePanel, pressing ESC could potentially act as "ReturnToMenuButton"
+            // For now, let's keep it simple: ESC works when game is actively running.
+            Debug.Log("Game is already paused (Time.timeScale is 0). ESC action ignored for now.");
+            return;
+        }
+
+        if (_isGameCurrentlyPlaying && LevelManager.Instance != null)
+        {
+            Debug.Log("ESC pressed during active gameplay. Returning to main menu.");
+            LevelManager.Instance.ReturnToMainMenu();
+            SetGamePlayingState(false); // Game is no longer "playing" in the foreground
         }
     }
 
     private void OnFlickPressStarted(InputAction.CallbackContext context)
     {
-        if (_mainCamera == null) return;
-
-        if (LevelManager.Instance != null && LevelManager.Instance._activeSeed != null &&
-            !LevelManager.Instance._activeSeed.IsLaunched && !LevelManager.Instance._activeSeed.IsStable)
+        if (!_isGameCurrentlyPlaying || LevelManager.Instance == null || LevelManager.Instance._activeSeed == null || !LevelManager.Instance._activeSeed.IsReadyForAiming)
         {
-            IsFlicking = true;
-            FlickStartPosition = GetPointerPositionInWorld();
-            OnFlickStart?.Invoke(FlickStartPosition);
-            Debug.Log($"InputManager: Flick Started. Seed is at World: {FlickStartPosition}");
+            IsFlicking = false;
+            return;
         }
-        else
-        {
-            Debug.Log("InputManager: Flick attempt ignored, seed not ready or already processed.");
-        }
+        
+        IsFlicking = true;
+        FlickStartPosition = GetPointerPositionInWorld();
+        OnFlickStart?.Invoke(FlickStartPosition);
+        // Debug.Log($"Flick Press Started at Screen: {Pointer.current.position.ReadValue()} World: {FlickStartPosition}");
     }
 
     private void OnFlickPressCanceled(InputAction.CallbackContext context)
     {
-        if (!IsFlicking || _mainCamera == null)
+        if (!IsFlicking || !_isGameCurrentlyPlaying) // Ensure flick was actually started and game is active
         {
-            if (IsFlicking) IsFlicking = false;
+            IsFlicking = false; // Reset just in case
             return;
         }
 
         IsFlicking = false;
         FlickEndPosition = GetPointerPositionInWorld();
-        OnFlickEnd?.Invoke(FlickStartPosition, FlickEndPosition);
+        // Debug.Log($"Flick Press Canceled at Screen: {Pointer.current.position.ReadValue()} World: {FlickEndPosition}");
 
         if (LevelManager.Instance != null)
         {
-            if (LevelManager.Instance._activeSeed != null &&
-                !LevelManager.Instance._activeSeed.IsLaunched &&
-                !LevelManager.Instance._activeSeed.IsStable)
-            {
-                LevelManager.Instance.RequestLaunchActiveSeed(FlickStartPosition, FlickEndPosition);
-            }
-            else
-            {
-                Debug.Log("InputManager: Flick cancelled, but seed state not appropriate for launch (already launched/stable).");
-            }
+            // Pass flick start position from where it was recorded, not current aim position.
+            LevelManager.Instance.RequestLaunchActiveSeed(FlickStartPosition, FlickEndPosition);
         }
-        else
-        {
-            Debug.LogError("InputManager: LevelManager.Instance is null. Cannot request seed launch.");
-        }
+        OnFlickEnd?.Invoke(FlickStartPosition, FlickEndPosition);
     }
 
     private void OnResetActionPerformed(InputAction.CallbackContext context)
     {
-        Debug.Log("InputManager: Reset Action Performed (Right Mouse Click).");
-        if (LevelManager.Instance != null)
-        {
-            LevelManager.Instance.RequestManualReset();
-        }
-        else
-        {
-            Debug.LogError("InputManager: LevelManager.Instance is null. Cannot request manual reset.");
-        }
+        if (!_isGameCurrentlyPlaying || LevelManager.Instance == null) return;
+
+        Debug.Log("Reset Action Performed (Right Mouse Button).");
+        LevelManager.Instance.RequestManualReset();
     }
 
     public Vector2 GetPointerPositionInWorld()

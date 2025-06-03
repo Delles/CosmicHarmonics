@@ -137,6 +137,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ffd516f3a0373174d9a899f98acbf8f5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  gravityStrength: 30
+  gravityStrength: 10
   effectRadius: 3
   affectedRigidbodies: []

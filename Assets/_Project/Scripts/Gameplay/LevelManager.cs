@@ -12,65 +12,112 @@ public class LevelManager : MonoBehaviour
     [SerializeField] private GameObject stabilityZonePrefab;
 
     [Header("Level Configuration")]
-    [SerializeField] private Vector2 initialSeedPosition = new Vector2(-5f, 0f); // Renamed for clarity - initial position before mouse takes over
-    [SerializeField] private Vector2 starSpawnPosition = new Vector2(3f, 0f);
-    [SerializeField] private Vector2 stabilityZoneSpawnPosition = new Vector2(0f, 3f);
-    [SerializeField] private Vector2 stabilityZoneScale = new Vector2(3f, 2f); // Example scale for a box zone
+    [SerializeField] private Vector2 initialSeedPosition = new Vector2(0, -4f);
+    [SerializeField] private Vector2 starSpawnPosition = new Vector2(3, 2);
+    [SerializeField] private Vector2 stabilityZoneSpawnPosition = new Vector2(-3, 2);
+    [SerializeField] private Vector2 stabilityZoneScale = Vector2.one;
+
+    [Header("UI References")]
+    [SerializeField] private GameplayUIController gameplayUIController; // Changed to SerializeField
+    [SerializeField] private MainMenuController mainMenuController; // Add this
 
     [Header("Runtime References")]
-    public SeedController _activeSeed; // Made public so InputManager can access it
-    // private List<SeedController> _allSeedsInLevel; // For future when we have multiple seeds
-    // private List<SeedController> _stabilizedSeeds; // For future
+    public SeedController _activeSeed { get; private set; } // Made property for clarity
 
     private bool _levelSetupComplete = false;
     private bool _levelCompleted = false;
     private Camera _mainCamera; // Cache the main camera
 
+    // Keep track of spawned objects for cleanup if we reset to main menu
+    private GameObject _spawnedStar;
+    private GameObject _spawnedStabilityZone;
+
     void Awake()
     {
-        if (Instance != null && Instance != this)
+        if (Instance == null)
+        {
+            Instance = this;
+            // DontDestroyOnLoad(gameObject); // Consider if LevelManager persists across scenes
+        }
+        else
         {
             Destroy(gameObject);
             return;
         }
-        Instance = this;
         
         _mainCamera = Camera.main;
         if (_mainCamera == null)
         {
             Debug.LogError("LevelManager: Main Camera not found! Ensure camera is tagged 'MainCamera'.", this);
         }
-        
-        // _allSeedsInLevel = new List<SeedController>();
-        // _stabilizedSeeds = new List<SeedController>();
+
+        // Remove the FindAnyObjectByType call from Awake for gameplayUIController
+        if (gameplayUIController == null) // Check if it's assigned in Inspector
+        {
+            Debug.LogError("GameplayUIController is not assigned in the LevelManager Inspector slot.");
+        }
+        if (mainMenuController == null) // Check new field
+        {
+            Debug.LogError("MainMenuController is not assigned in the LevelManager Inspector slot.");
+        }
     }
 
-    void Start()
+    // Changed from Start() to be called manually
+    public void StartLevel()
     {
+        Debug.Log("LevelManager: StartLevel called.");
+        if (_levelSetupComplete) // If level is already setup, perhaps reset it first
+        {
+            ResetLevelInternally(); // A new method to clean up and restart
+        }
+
+        if (gameplayUIController != null) // Use the serialized field
+        {
+            gameplayUIController.ShowGameplayUI(); // Show the gameplay canvas
+            gameplayUIController.HideLevelCompletePanel(); // Ensure panel is hidden
+        }
+        else
+        {
+            Debug.LogWarning("GameplayUIController not assigned in LevelManager Inspector. UI might not behave as expected.");
+        }
+        
+        Time.timeScale = 1f; // Ensure game is running
         SetupLevel();
+
+        if (InputManager.Instance != null)
+        {
+            InputManager.Instance.SetGamePlayingState(true);
+        }
     }
 
     void Update()
     {
-        if (!_levelSetupComplete || _levelCompleted) return;
+        if (!_levelSetupComplete || _activeSeed == null) return;
 
-        // Check for seed out of bounds
-        if (_activeSeed != null && _activeSeed.IsLaunched && !_activeSeed.IsStable) // Only check if launched and not yet stable
+        if (_activeSeed.IsLaunched && !_activeSeed.IsStable && !_levelCompleted)
         {
             CheckSeedOutOfBounds();
         }
 
+        // Win condition check can remain, or be tied to HandleSeedStabilized more directly
         CheckWinCondition();
     }
 
     void SetupLevel()
     {
-        Debug.Log("LevelManager: Setting up level...");
+        // Clear previous level objects if any
+        ClearLevelObjects();
+
+        Debug.Log("LevelManager: Setting up level.");
 
         // Spawn Star
         if (starPrefab != null)
         {
-            Instantiate(starPrefab, starSpawnPosition, Quaternion.identity, transform.parent.Find("// -- ENVIRONMENT --")); // Optional: parent to Environment
+            _spawnedStar = Instantiate(starPrefab, starSpawnPosition, Quaternion.identity);
+            _spawnedStar.name = "Spawned_Star";
+            Transform envParent = GameObject.Find("// -- ENVIRONMENT --")?.transform;
+            if (envParent != null)
+                _spawnedStar.transform.SetParent(envParent);
             Debug.Log($"LevelManager: Spawned Star at {starSpawnPosition}");
         }
         else
@@ -81,8 +128,12 @@ public class LevelManager : MonoBehaviour
         // Spawn Stability Zone
         if (stabilityZonePrefab != null)
         {
-            GameObject zoneGO = Instantiate(stabilityZonePrefab, stabilityZoneSpawnPosition, Quaternion.identity, transform.parent.Find("// -- ENVIRONMENT --"));
-            zoneGO.transform.localScale = stabilityZoneScale; // Adjust scale if necessary
+            _spawnedStabilityZone = Instantiate(stabilityZonePrefab, stabilityZoneSpawnPosition, Quaternion.identity);
+            _spawnedStabilityZone.name = "Spawned_StabilityZone";
+            _spawnedStabilityZone.transform.localScale = stabilityZoneScale;
+            Transform envParent = GameObject.Find("// -- ENVIRONMENT --")?.transform;
+            if (envParent != null)
+                _spawnedStabilityZone.transform.SetParent(envParent);
             Debug.Log($"LevelManager: Spawned Stability Zone at {stabilityZoneSpawnPosition} with scale {stabilityZoneScale}");
         }
         else
@@ -95,22 +146,48 @@ public class LevelManager : MonoBehaviour
 
         _levelSetupComplete = true;
         _levelCompleted = false; // Ensure level isn't marked complete on setup/restart
-        Debug.Log("LevelManager: Level setup complete.");
+        Debug.Log("LevelManager: Level setup complete. Active seed should be ready for aiming.");
+    }
+
+    private void ClearLevelObjects()
+    {
+        if (_activeSeed != null)
+        {
+            _activeSeed.OnSeedStabilized -= HandleSeedStabilized;
+            _activeSeed.OnSeedLaunched -= HandleSeedLaunched;
+            Destroy(_activeSeed.gameObject);
+            _activeSeed = null;
+        }
+        if (_spawnedStar != null)
+        {
+            Destroy(_spawnedStar);
+            _spawnedStar = null;
+        }
+        if (_spawnedStabilityZone != null)
+        {
+            Destroy(_spawnedStabilityZone);
+            _spawnedStabilityZone = null;
+        }
     }
 
     public void SpawnSeed()
     {
         if (seedPrefab != null)
         {
-            // Ensure only one active seed for now in this simple setup
-            if (_activeSeed != null && _activeSeed.gameObject.activeInHierarchy)
+            // Clean up existing seed if any
+            if (_activeSeed != null)
             {
-                 Debug.LogWarning("LevelManager: An active seed already exists. Resetting it for aiming.");
-                 _activeSeed.PrepareForAiming(initialSeedPosition); // Reset existing seed
-                 return;
+                _activeSeed.OnSeedStabilized -= HandleSeedStabilized;
+                _activeSeed.OnSeedLaunched -= HandleSeedLaunched;
+                Destroy(_activeSeed.gameObject);
             }
 
-            GameObject seedGO = Instantiate(seedPrefab, initialSeedPosition, Quaternion.identity, transform.parent.Find("// -- DYNAMIC_OBJECTS --"));
+            GameObject seedGO = Instantiate(seedPrefab, initialSeedPosition, Quaternion.identity);
+            seedGO.name = "Spawned_ActiveSeed";
+            Transform dynamicParent = GameObject.Find("// -- DYNAMIC_OBJECTS --")?.transform;
+            if (dynamicParent != null)
+                seedGO.transform.SetParent(dynamicParent);
+
             _activeSeed = seedGO.GetComponent<SeedController>();
 
             if (_activeSeed != null)
@@ -119,7 +196,6 @@ public class LevelManager : MonoBehaviour
                 // Subscribe to the seed's stabilization event
                 _activeSeed.OnSeedStabilized += HandleSeedStabilized;
                 _activeSeed.OnSeedLaunched += HandleSeedLaunched; // New event
-                // _allSeedsInLevel.Add(_activeSeed); // For future
                 Debug.Log($"LevelManager: Spawned Seed and prepared for aiming at {initialSeedPosition}");
             }
             else
@@ -136,62 +212,52 @@ public class LevelManager : MonoBehaviour
     // NEW Method: Called by InputManager to update the aiming seed's position
     public void UpdateActiveSeedAimPosition(Vector2 mouseWorldPosition)
     {
-        if (_activeSeed != null && _activeSeed.IsReadyForAiming)
-        {
-            _activeSeed.UpdateAimPosition(mouseWorldPosition);
-        }
+        if (!_levelSetupComplete || _activeSeed == null || !_activeSeed.IsReadyForAiming) return;
+        _activeSeed.UpdateAimPosition(mouseWorldPosition);
     }
 
     // Called by InputManager when a flick is performed
     public void RequestLaunchActiveSeed(Vector2 flickStartPosition, Vector2 flickEndPosition)
     {
-        if (_activeSeed == null || !_activeSeed.gameObject.activeInHierarchy)
+        if (!_levelSetupComplete || _activeSeed == null || !_activeSeed.IsReadyForAiming || _activeSeed.IsLaunched || _activeSeed.IsStable)
         {
-            Debug.LogError("LevelManager: No active seed to launch or seed is inactive. Level may need reset.");
+            Debug.LogWarning("LevelManager: Cannot launch seed: Not ready, already launched, or stable.");
             return;
         }
 
-        // Seed should ALREADY be at flickStartPosition because it was following the mouse,
-        // and UpdateAimPosition would have stopped when InputManager.IsFlicking became true.
-        // We ensure it's not already launched or stable.
-        if (_activeSeed != null && !_activeSeed.IsLaunched && !_activeSeed.IsStable)
-        {
-            // Sanity check or ensure its position is exactly the flick start.
-            // _activeSeed.transform.position = flickStartPosition; // This might be redundant if UpdateAimPosition worked correctly up to the flick start.
-
-            Vector2 flickVector = flickEndPosition - flickStartPosition;
-            _activeSeed.Launch(flickVector); // SeedController now handles making itself Dynamic
-            Debug.Log("LevelManager: Launching active seed.");
-        }
-        else if (_activeSeed != null && (_activeSeed.IsLaunched || _activeSeed.IsStable))
-        {
-            Debug.Log($"LevelManager: Seed '{_activeSeed.name}' is already launched or stable. Ignoring flick attempt.");
-        }
-        else if (_activeSeed == null)
-        {
-             Debug.LogError("LevelManager: _activeSeed is null. Cannot launch.");
-        }
+        Vector2 flickVector = flickEndPosition - flickStartPosition;
+        _activeSeed.Launch(flickVector); // SeedController now handles making itself Dynamic
+        Debug.Log($"LevelManager: Launch requested. Flick Start: {flickStartPosition}, Flick End: {flickEndPosition}, Flick Vector: {flickVector}");
     }
 
     private void HandleSeedLaunched(SeedController seed)
     {
-        Debug.Log($"LevelManager: Seed {seed.name} was launched.");
-        // Future: maybe deduct a seed from available count, etc.
+        if (seed == _activeSeed)
+        {
+            Debug.Log("LevelManager: Active seed launched!");
+        }
     }
 
     private void HandleSeedStabilized(SeedController stabilizedSeed)
     {
-        Debug.Log($"LevelManager: Seed {stabilizedSeed.name} has stabilized!");
-        // if (!_stabilizedSeeds.Contains(stabilizedSeed)) // For future
-        // {
-        //     _stabilizedSeeds.Add(stabilizedSeed);
-        // }
-        // For this MVP, one seed stabilizing means level complete.
-        if (!_levelCompleted) // Check if not already completed
+        if (stabilizedSeed == _activeSeed && !_levelCompleted)
         {
-            _levelCompleted = true; // Set completion flag
-            Debug.LogWarning("LEVEL COMPLETE! The seed has stabilized.");
-            // Additional win condition logic can go here
+            _levelCompleted = true;
+            Debug.Log("LEVEL COMPLETE! Active seed has stabilized.");
+            
+            if (InputManager.Instance != null)
+            {
+                InputManager.Instance.SetGamePlayingState(false); // Gameplay effectively paused by UI
+            }
+
+            if (gameplayUIController != null) // Use the serialized field
+            {
+                gameplayUIController.ShowLevelCompletePanel();
+            }
+            else
+            {
+                Debug.LogWarning("GameplayUIController not assigned in LevelManager Inspector. Cannot show Level Complete panel.");
+            }
         }
     }
 
@@ -215,21 +281,23 @@ public class LevelManager : MonoBehaviour
         }
     }
 
-    // Public method to be called by InputManager for manual reset
+    // Public method to be called by InputManager for manual reset (e.g., Right Mouse Button)
     public void RequestManualReset()
     {
-        Debug.Log("LevelManager: Manual reset requested.", this);
-        if (_activeSeed != null)
+        Debug.Log("LevelManager: Manual reset requested.");
+        if (_activeSeed != null && _levelSetupComplete)
         {
-            // Reset the seed to its initial position, ready for aiming again.
             ResetActiveSeed();
-            _levelCompleted = false; // Ensure win condition is also reset
+            _levelCompleted = false; // Reset level complete status
+            if (InputManager.Instance != null)
+            {
+                InputManager.Instance.SetGamePlayingState(true); // After reset, game is playable again
+            }
         }
-        else
+        else if (!_levelSetupComplete)
         {
-            // If no active seed, might mean we need to spawn one (or do a full level reset)
-            Debug.LogWarning("LevelManager: No active seed to reset, consider full level reset or spawning.");
-            ResetLevel(); // Or SpawnSeed() if you prefer less aggressive reset
+            Debug.LogWarning("LevelManager: Level not set up. Cannot perform manual reset yet. Starting level instead.");
+            StartLevel();
         }
     }
 
@@ -244,15 +312,51 @@ public class LevelManager : MonoBehaviour
         }
     }
 
+    // Renamed from ResetLevel to avoid confusion with manual in-game reset.
+    // This method is more like "restart the whole level from scratch"
+    private void ResetLevelInternally()
+    {
+        Debug.Log("LevelManager: Resetting level internally.");
+        ClearLevelObjects(); // Clear existing spawned objects
+        _levelSetupComplete = false;
+        _levelCompleted = false;
+        // SetupLevel() will be called by StartLevel()
+    }
+
+    // New method to handle returning to the main menu
+    public void ReturnToMainMenu() // Modified to also hide GameplayUI
+    {
+        Debug.Log("LevelManager: Returning to Main Menu.");
+        ClearLevelObjects();
+        _levelSetupComplete = false;
+        _levelCompleted = false;
+
+        if (InputManager.Instance != null)
+        {
+            InputManager.Instance.SetGamePlayingState(false);
+        }
+
+        if (gameplayUIController != null)
+        {
+            gameplayUIController.HideGameplayUI(); // Hide the gameplay canvas
+        }
+
+        if (mainMenuController != null) // Use the serialized field
+        {
+            mainMenuController.ShowMenu(); // This also sets Time.timeScale = 0f
+        }
+        else
+        {
+            Debug.LogError("MainMenuController not assigned in LevelManager Inspector. Cannot return to menu.");
+        }
+    }
+
     void CheckWinCondition()
     {
         // For MVP: if the _activeSeed is stable, level is complete.
         if (_activeSeed != null && _activeSeed.IsStable && !_levelCompleted)
         {
-            _levelCompleted = true;
-            Debug.LogWarning("LEVEL COMPLETE! The seed has stabilized.");
-            // Here you would trigger UI, sounds, next level logic, etc.
-            // For now, we just log.
+            HandleSeedStabilized(_activeSeed);
         }
     }
 
@@ -260,27 +364,9 @@ public class LevelManager : MonoBehaviour
     public void ResetLevel()
     {
         Debug.Log("LevelManager: Resetting level...");
-        // Clear existing spawned objects (simplistic for now, better would be pooling or specific cleanup)
-        if (_activeSeed != null)
-        {
-            _activeSeed.OnSeedStabilized -= HandleSeedStabilized; // Unsubscribe
-            _activeSeed.OnSeedLaunched -= HandleSeedLaunched;   // Unsubscribe
-            Destroy(_activeSeed.gameObject);
-            _activeSeed = null;
-        }
-
-        // This is a very naive way to clear other objects.
-        // Proper way would be to keep references or use a parent GameObject to destroy.
-        foreach (var star in FindObjectsByType<GravityWell_Star>(FindObjectsSortMode.None)) Destroy(star.gameObject);
-        foreach (var zone in FindObjectsByType<StabilityZone>(FindObjectsSortMode.None)) Destroy(zone.gameObject);
-
-        // _allSeedsInLevel.Clear();
-        // _stabilizedSeeds.Clear();
-        _levelCompleted = false;
-        _levelSetupComplete = false;
-        Start(); // Re-setup the level
+        ResetLevelInternally();
+        SetupLevel();
     }
-
 
     void OnDestroy()
     {
@@ -290,5 +376,7 @@ public class LevelManager : MonoBehaviour
             _activeSeed.OnSeedStabilized -= HandleSeedStabilized;
             _activeSeed.OnSeedLaunched -= HandleSeedLaunched;
         }
+        // If LevelManager was a persistent singleton, clear Instance here:
+        // if (Instance == this) Instance = null;
     }
 }

@@ -117,6 +117,15 @@ public partial class @PlayerControls: IInputActionCollection2, IDisposable
                     ""processors"": """",
                     ""interactions"": """",
                     ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""StopGame"",
+                    ""type"": ""Button"",
+                    ""id"": ""4df568b4-3b58-433b-ab73-5fee83fe9bd2"",
+                    ""expectedControlType"": """",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
                 }
             ],
             ""bindings"": [
@@ -152,6 +161,17 @@ public partial class @PlayerControls: IInputActionCollection2, IDisposable
                     ""action"": ""ResetAction"",
                     ""isComposite"": false,
                     ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""f9f926f2-c79a-4c3a-ad26-c7915a082b18"",
+                    ""path"": ""<Keyboard>/escape"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""StopGame"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
                 }
             ]
         }
@@ -163,6 +183,7 @@ public partial class @PlayerControls: IInputActionCollection2, IDisposable
         m_Gameplay_FlickPress = m_Gameplay.FindAction("FlickPress", throwIfNotFound: true);
         m_Gameplay_PointerPosition = m_Gameplay.FindAction("PointerPosition", throwIfNotFound: true);
         m_Gameplay_ResetAction = m_Gameplay.FindAction("ResetAction", throwIfNotFound: true);
+        m_Gameplay_StopGame = m_Gameplay.FindAction("StopGame", throwIfNotFound: true);
     }
 
     ~@PlayerControls()
@@ -246,6 +267,7 @@ public partial class @PlayerControls: IInputActionCollection2, IDisposable
     private readonly InputAction m_Gameplay_FlickPress;
     private readonly InputAction m_Gameplay_PointerPosition;
     private readonly InputAction m_Gameplay_ResetAction;
+    private readonly InputAction m_Gameplay_StopGame;
     /// <summary>
     /// Provides access to input actions defined in input action map "Gameplay".
     /// </summary>
@@ -269,6 +291,10 @@ public partial class @PlayerControls: IInputActionCollection2, IDisposable
         /// Provides access to the underlying input action "Gameplay/ResetAction".
         /// </summary>
         public InputAction @ResetAction => m_Wrapper.m_Gameplay_ResetAction;
+        /// <summary>
+        /// Provides access to the underlying input action "Gameplay/StopGame".
+        /// </summary>
+        public InputAction @StopGame => m_Wrapper.m_Gameplay_StopGame;
         /// <summary>
         /// Provides access to the underlying input action map instance.
         /// </summary>
@@ -304,6 +330,9 @@ public partial class @PlayerControls: IInputActionCollection2, IDisposable
             @ResetAction.started += instance.OnResetAction;
             @ResetAction.performed += instance.OnResetAction;
             @ResetAction.canceled += instance.OnResetAction;
+            @StopGame.started += instance.OnStopGame;
+            @StopGame.performed += instance.OnStopGame;
+            @StopGame.canceled += instance.OnStopGame;
         }
 
         /// <summary>
@@ -324,6 +353,9 @@ public partial class @PlayerControls: IInputActionCollection2, IDisposable
             @ResetAction.started -= instance.OnResetAction;
             @ResetAction.performed -= instance.OnResetAction;
             @ResetAction.canceled -= instance.OnResetAction;
+            @StopGame.started -= instance.OnStopGame;
+            @StopGame.performed -= instance.OnStopGame;
+            @StopGame.canceled -= instance.OnStopGame;
         }
 
         /// <summary>
@@ -385,5 +417,12 @@ public partial class @PlayerControls: IInputActionCollection2, IDisposable
         /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
         /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
         void OnResetAction(InputAction.CallbackContext context);
+        /// <summary>
+        /// Method invoked when associated input action "StopGame" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
+        /// </summary>
+        /// <seealso cref="UnityEngine.InputSystem.InputAction.started" />
+        /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
+        /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
+        void OnStopGame(InputAction.CallbackContext context);
     }
 }

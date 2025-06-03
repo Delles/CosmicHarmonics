@@ -1,9 +1,7 @@
 # Cosmic Harmonics - Script Documentation
 
-This document provides an overview of the C# scripts created for the "Cosmic Harmonics" project, detailing their purpose, public members, and key methods.
-
 **Last Updated:** (Set this to today's date)
-**Current Phase:** Phase 1: Prototyping (MVP) - Level Manager & Reset Logic Implemented
+**Current Phase:** Phase 1: Prototyping (MVP) - Basic UI Flow and ESC Navigation Implemented
 
 ---
 
@@ -17,6 +15,9 @@ This document provides an overview of the C# scripts created for the "Cosmic Har
     -   `SeedController.cs`
     -   `GravityWell_Star.cs`
     -   `StabilityZone.cs`
+3.  **UI Systems (`Assets/_Project/Scripts/UI/`)**
+    -   `MainMenuController.cs`
+    -   `GameplayUIController.cs`
 
 ---
 
@@ -27,20 +28,20 @@ This document provides an overview of the C# scripts created for the "Cosmic Har
 **File Path:** `Assets/_Project/Scripts/Core/Input/InputManager.cs`
 
 **Purpose:**
-Handles player input for flicking actions and reset requests using Unity's new Input System. It detects mouse gestures, converts screen coordinates to world coordinates, and communicates with `LevelManager` to control seed aiming, launching, and resetting.
+Handles player input for flicking actions, reset requests, and game pause/stop requests (ESC key) using Unity's new Input System. It detects mouse gestures, converts screen coordinates to world coordinates, and communicates with `LevelManager` to control seed aiming/launching and UI/game state changes. Manages an internal `_isGameCurrentlyPlaying` flag to enable/disable input processing based on game state.
 
 **Inheritance:** `MonoBehaviour`
 
-**Key Components Required on GameObject:** None (but it references `Camera.main` and `LevelManager.Instance`).
+**Key Components Required on GameObject:** None (but it references `Camera.main` and interacts with `LevelManager.Instance`).
 
-**Public Members:**
+**Public Members (Runtime & Events):**
 
 -   **`public static InputManager Instance { get; private set; }`**
     -   A static property for implementing the Singleton pattern.
 -   **`public Vector2 FlickStartPosition { get; private set; }`**
-    -   The world-space coordinates where the flick gesture started (mouse button pressed).
+    -   The world-space coordinates where the flick gesture started.
 -   **`public Vector2 FlickEndPosition { get; private set; }`**
-    -   The world-space coordinates where the flick gesture ended (mouse button released).
+    -   The world-space coordinates where the flick gesture ended.
 -   **`public bool IsFlicking { get; private set; }`**
     -   A boolean flag indicating if a flick gesture is currently in progress.
 -   **`public event System.Action<Vector2> OnFlickStart;`**
@@ -53,25 +54,29 @@ Handles player input for flicking actions and reset requests using Unity's new I
 -   **`private void Awake()`**
     -   Implements Singleton pattern. Initializes `_playerControls` and caches `_mainCamera`.
 -   **`private void Update()`**
-    -   If not currently flicking (`!IsFlicking`) and an aimable seed exists (checked via `LevelManager.Instance._activeSeed.IsReadyForAiming`), continuously calls `LevelManager.Instance.UpdateActiveSeedAimPosition()` with the current mouse world position.
+    -   If `_isGameCurrentlyPlaying` is true, not flicking, and an aimable seed exists, continuously calls `LevelManager.Instance.UpdateActiveSeedAimPosition()` with the current mouse world position.
 -   **`private void OnEnable()` / `private void OnDisable()`**
-    -   Subscribes/unsubscribes to `_playerControls.Gameplay.FlickPress` (started/canceled) and `_playerControls.Gameplay.ResetAction` (performed) events. Enables/disables the "Gameplay" action map.
+    -   Subscribes/unsubscribes to `_playerControls.Gameplay.FlickPress` (started/canceled), `_playerControls.Gameplay.ResetAction` (performed), and `_playerControls.Gameplay.StopGame` (performed) events. Enables/disables the "Gameplay" action map.
+-   **`public void SetGamePlayingState(bool isPlaying)`**
+    -   Sets the internal `_isGameCurrentlyPlaying` flag. Called by `LevelManager` and `MainMenuController` to control input processing.
+-   **`private void OnStopGamePerformed(InputAction.CallbackContext context)`**
+    -   Called when the `StopGame` action (ESC key) is performed.
+    -   If `_isGameCurrentlyPlaying` is true and `Time.timeScale` is not `0f` (i.e., game is active and not already paused by UI), calls `LevelManager.Instance.ReturnToMainMenu()` and sets `_isGameCurrentlyPlaying = false`.
 -   **`private void OnFlickPressStarted(InputAction.CallbackContext context)`**
-    -   Sets `IsFlicking = true` if a seed is ready for launch (checked via `LevelManager`).
+    -   If `_isGameCurrentlyPlaying` and a seed is ready for launch, sets `IsFlicking = true`.
     -   Records `FlickStartPosition`. Invokes `OnFlickStart` event.
 -   **`private void OnFlickPressCanceled(InputAction.CallbackContext context)`**
-    -   Sets `IsFlicking = false`. Records `FlickEndPosition`. Invokes `OnFlickEnd` event.
-    -   Calls `LevelManager.Instance.RequestLaunchActiveSeed()` if a seed is in a launchable state.
+    -   If `IsFlicking` and `_isGameCurrentlyPlaying`, sets `IsFlicking = false`. Records `FlickEndPosition`.
+    -   Calls `LevelManager.Instance.RequestLaunchActiveSeed()`. Invokes `OnFlickEnd` event.
 -   **`private void OnResetActionPerformed(InputAction.CallbackContext context)`**
-    -   Called when the `ResetAction` (e.g., right mouse click) is performed.
-    -   Calls `LevelManager.Instance.RequestManualReset()`.
+    -   If `_isGameCurrentlyPlaying`, calls `LevelManager.Instance.RequestManualReset()`.
 -   **`public Vector2 GetPointerPositionInWorld()`**
     -   Reads pointer screen position, converts to world coordinates using `_mainCamera`.
 
 **Dependencies:**
 
 -   `PlayerControls.cs` (auto-generated input class).
--   `LevelManager.cs` (for controlling seed aiming, launch, and reset).
+-   `LevelManager.cs` (for controlling seed aiming, launch, reset, and game state changes).
 -   A `Camera` tagged "MainCamera" in the scene.
 
 ---
@@ -81,14 +86,15 @@ Handles player input for flicking actions and reset requests using Unity's new I
 **File Path:** `Assets/_Project/Scripts/Core/Input/PlayerControls.cs`
 
 **Purpose:**
-Auto-generated by Unity's Input System based on the `PlayerControls.inputactions` asset. Provides a C# interface to defined Action Maps, Actions, and Bindings. **This script should NOT be manually edited.**
+Auto-generated by Unity's Input System (version `1.13.1` or as per file) based on the `PlayerControls.inputactions` asset. Provides a C# interface to defined Action Maps, Actions, and Bindings. **This script should NOT be manually edited.**
 
 **Key Auto-generated Content (Relevant to Gameplay Action Map):**
 
 -   **Action Map:** `Gameplay`
     -   **Action:** `FlickPress` (Button, bound to Mouse Left Button)
     -   **Action:** `PointerPosition` (Value, Vector2, bound to Mouse Position)
-    -   **Action:** `ResetAction` (Button, bound to Mouse Right Button) - _New_
+    -   **Action:** `ResetAction` (Button, bound to Mouse Right Button)
+    -   **Action:** `StopGame` (Button, bound to Keyboard Escape key) - _New_
 
 ---
 
@@ -99,163 +105,171 @@ Auto-generated by Unity's Input System based on the `PlayerControls.inputactions
 **File Path:** `Assets/_Project/Scripts/Gameplay/LevelManager.cs`
 
 **Purpose:**
-Manages the setup of a basic level, the lifecycle of a single active seed (spawning, aiming, launching, detecting stabilization), checking win conditions, and handling reset requests (manual or due to seed going out of bounds).
+Orchestrates level setup, manages the lifecycle of the active seed (spawning, aiming, launching, stabilization), checks win conditions, and handles UI transitions (Start Menu, Gameplay UI, Level Complete). Communicates game state changes to `InputManager`.
 
 **Inheritance:** `MonoBehaviour`
 
-**Key Components Required on GameObject:** None (but it instantiates prefabs and references `Camera.main`).
+**Key Components Required on GameObject:** None (but instantiates prefabs and references other controllers/camera).
 
 **Public Members (Serialized Fields for Inspector):**
 
 -   **`[SerializeField] private GameObject seedPrefab;`**
 -   **`[SerializeField] private GameObject starPrefab;`**
 -   **`[SerializeField] private GameObject stabilityZonePrefab;`**
--   **`[SerializeField] private Vector2 initialSeedPosition;`** (Position for seed before mouse aiming)
+-   **`[SerializeField] private Vector2 initialSeedPosition;`**
 -   **`[SerializeField] private Vector2 starSpawnPosition;`**
 -   **`[SerializeField] private Vector2 stabilityZoneSpawnPosition;`**
 -   **`[SerializeField] private Vector2 stabilityZoneScale;`**
+-   **`[Header("UI References")]`**
+    -   **`[SerializeField] private GameplayUIController gameplayUIController;`**
+    -   **`[SerializeField] private MainMenuController mainMenuController;`**
 
 **Public Members (Runtime):**
 
 -   **`public static LevelManager Instance { get; private set; }`** (Singleton instance)
--   **`public SeedController _activeSeed;`** (Reference to the current seed; _note: direct public access used for `InputManager`_)
+-   **`public SeedController _activeSeed { get; private set; }`** (Reference to the current seed)
 
 **Key Methods:**
 
 -   **`private void Awake()`**
-    -   Implements Singleton. Caches `_mainCamera = Camera.main`.
--   **`private void Start()`**
-    -   Calls `SetupLevel()`.
--   **`private void Update()`**
-    -   If level is active and not complete, checks if the active seed is out of camera bounds (`CheckSeedOutOfBounds()`).
-    -   Calls `CheckWinCondition()`.
+    -   Implements Singleton. Caches `_mainCamera`. Checks Inspector assignments for `gameplayUIController` and `mainMenuController`.
+-   **`public void StartLevel()`**
+    -   Called by `MainMenuController`. Clears/resets previous level if needed.
+    -   Shows `GameplayUI` via `gameplayUIController`. Sets `Time.timeScale = 1f`.
+    -   Calls `SetupLevel()`. Informs `InputManager` that game is playing (`SetGamePlayingState(true)`).
 -   **`private void SetupLevel()`**
-    -   Instantiates Star and Stability Zone from prefabs at configured positions/scales.
-    -   Calls `SpawnSeed()`. Sets `_levelSetupComplete = true`, `_levelCompleted = false`.
+    -   Calls `ClearLevelObjects()`. Instantiates Star, Stability Zone, and calls `SpawnSeed()`.
+    -   Sets `_levelSetupComplete = true`, `_levelCompleted = false`.
+-   **`private void ClearLevelObjects()`**
+    -   Helper method to destroy `_activeSeed`, `_spawnedStar`, and `_spawnedStabilityZone`. Unsubscribes from seed events.
 -   **`public void SpawnSeed()`**
-    -   Instantiates `seedPrefab` if no active seed exists or resets existing one.
-    -   Calls `_activeSeed.PrepareForAiming()` with `initialSeedPosition`.
-    -   Subscribes to `_activeSeed.OnSeedStabilized` and `_activeSeed.OnSeedLaunched`.
--   **`public void UpdateActiveSeedAimPosition(Vector2 mouseWorldPosition)`**
-    -   Calls `_activeSeed.UpdateAimPosition()` if the seed is ready for aiming.
--   **`public void RequestLaunchActiveSeed(Vector2 flickStartPosition, Vector2 flickEndPosition)`**
-    -   If `_activeSeed` is ready (not launched/stable), calculates `flickVector` and calls `_activeSeed.Launch()`.
-    -   Ignores request if seed is already launched or stable.
--   **`private void HandleSeedLaunched(SeedController seed)`**
-    -   Logs seed launch.
--   **`private void HandleSeedStabilized(SeedController stabilizedSeed)`**
-    -   Sets `_levelCompleted = true` if not already, logs "LEVEL COMPLETE!".
--   **`private void CheckSeedOutOfBounds()`**
-    -   If active, launched, non-stable seed is outside camera viewport (plus buffer), calls `ResetActiveSeed()`.
--   **`public void RequestManualReset()`**
-    -   Called by `InputManager` on right-click. Calls `ResetActiveSeed()`. Resets `_levelCompleted`.
+    -   Instantiates `seedPrefab`, gets `SeedController`, prepares it for aiming, subscribes to its events.
+-   **`public void UpdateActiveSeedAimPosition(Vector2 mouseWorldPosition)`** (Called by `InputManager`)
+-   **`public void RequestLaunchActiveSeed(Vector2 flickStartPosition, Vector2 flickEndPosition)`** (Called by `InputManager`)
+-   **`private void HandleSeedLaunched(SeedController seed)`** (Event handler)
+-   **`private void HandleSeedStabilized(SeedController stabilizedSeed)`** (Event handler)
+    -   Sets `_levelCompleted = true`. Informs `InputManager` game is not actively playing.
+    -   Calls `gameplayUIController.ShowLevelCompletePanel()`.
+-   **`private void CheckSeedOutOfBounds()`** (Called in `Update`)
+-   **`public void RequestManualReset()`** (Called by `InputManager`)
+    -   Resets `_activeSeed`, `_levelCompleted`. Informs `InputManager` game is playing.
 -   **`private void ResetActiveSeed()`**
-    -   Calls `_activeSeed.PrepareForAiming(initialSeedPosition)` and resets `_levelCompleted`.
--   **`public void ResetLevel()`**
-    -   Destroys existing spawned level elements (Star, Zone, Seed - using `FindObjectsByType`) and re-calls `Start()` (which calls `SetupLevel()`).
--   **`private void CheckWinCondition()`**
-    -   If `_activeSeed` is stable and `_levelCompleted` is false, sets `_levelCompleted = true` and logs "LEVEL COMPLETE!".
+-   **`private void ResetLevelInternally()`**
+-   **`public void ReturnToMainMenu()`**
+    -   Calls `ClearLevelObjects()`. Informs `InputManager` game is not playing.
+    -   Calls `gameplayUIController.HideGameplayUI()`. Calls `mainMenuController.ShowMenu()`.
+-   **`private void CheckWinCondition()`** (Called in `Update`)
+-   **`public void ResetLevel()`** (Public method for full level restart)
 -   **`private void OnDestroy()`**
     -   Unsubscribes from `_activeSeed` events.
 
 **Dependencies:**
 
--   `SeedController.cs`
--   `InputManager.cs` (indirectly, as `InputManager` calls its public methods)
--   `GravityWell_Star.cs` (as a prefab)
--   `StabilityZone.cs` (as a prefab)
+-   `InputManager.cs` (to update game playing state).
+-   `SeedController.cs` (as prefab and for event subscription).
+-   `GameplayUIController.cs` (for managing gameplay UI).
+-   `MainMenuController.cs` (for showing the main menu).
+-   `GravityWell_Star.cs`, `StabilityZone.cs` (as prefabs).
 -   A `Camera` tagged "MainCamera".
--   Scene GameObjects named `// -- ENVIRONMENT --` and `// -- DYNAMIC_OBJECTS --` if parenting instantiated objects.
 
 ---
 
-### 2.2. `SeedController.cs`
+## _(Documentation for `SeedController.cs`, `GravityWell_Star.cs`, `StabilityZone.cs` would remain here as per previous state, assuming no changes to them in this session.)_
 
-**File Path:** `Assets/_Project/Scripts/Gameplay/SeedController.cs`
+## 3. UI Systems
+
+### 3.1. `MainMenuController.cs`
+
+**File Path:** `Assets/_Project/Scripts/UI/MainMenuController.cs`
 
 **Purpose:**
-Manages behavior of an individual "celestial seed," including aiming, physics, launch, state (kinematic for aiming, dynamic when launched, stabilizing, stable), interaction with stability zones, and visual feedback.
+Manages the Start Menu UI Canvas. Handles the "Start Game" button press to initiate gameplay via `LevelManager` and provides a method to show/activate the main menu, typically when returning from gameplay or on game launch.
 
 **Inheritance:** `MonoBehaviour`
 
-**Key Components Required on GameObject:** `Rigidbody2D`, `CircleCollider2D`, `SpriteRenderer`.
+**Key Components Required on GameObject:** Typically attached to the `StartMenuCanvas` GameObject. Needs UI elements assigned in Inspector.
 
 **Public Members (Serialized Fields for Inspector):**
 
--   **`public float launchForceMultiplier = 10f;`**
--   **`public float stabilizationTimeRequired = 2f;`**
--   **`public float quasiStationaryVelocityThreshold = 0.1f;`**
--   **`[SerializeField] private float defaultDrag = 0.1f;`** (Refers to `Rigidbody2D.linearDamping`)
--   **`[SerializeField] private float dragInStabilityZone = 2f;`** (Refers to `Rigidbody2D.linearDamping`)
--   **`public Color flyingColor = Color.white;`**
--   **`public Color stabilizingColor = Color.yellow;`**
--   **`public Color stableColor = Color.green;`**
+-   **`[Header("UI Elements")]`**
+    -   **`[SerializeField] private Button startGameButton;`**
+-   **`[Header("Controller References")]`**
+    -   **`[SerializeField] private GameplayUIController gameplayUIController;`**
 
-**Public Members (Runtime & Events):**
+**Key Methods:**
 
--   **`public event Action<SeedController> OnSeedStabilized;`**
--   **`public event Action<SeedController> OnSeedLaunched;`**
--   **`public bool IsLaunched { get; }`**
--   **`public bool IsStable { get; }`**
--   **`public bool IsReadyForAiming { get; }`** (True if not launched, not stable, and Rigidbody2D is Kinematic)
+-   **`private void Start()`**
+    -   Assigns `startGameButton.onClick` listener to `HandleStartGame`.
+    -   Ensures `gameplayUIController` is assigned and calls its `HideGameplayUI()` method.
+    -   Calls `ShowMenu()` to set the initial state (menu visible, game paused).
+-   **`private void HandleStartGame()`**
+    -   Disables the `StartMenuCanvas`'s GameObject.
+    -   Calls `LevelManager.Instance.StartLevel()` to begin gameplay.
+-   **`public void ShowMenu()`**
+    -   Activates the `StartMenuCanvas`'s GameObject.
+    -   Sets `Time.timeScale = 0f` to pause game logic.
+    -   Calls `gameplayUIController.HideGameplayUI()` to ensure gameplay elements are hidden.
+    -   Calls `InputManager.Instance.SetGamePlayingState(false)` to indicate game is not actively playing.
+-   **`private void OnDestroy()`**
+    -   Removes `startGameButton.onClick` listener.
+
+**Dependencies:**
+
+-   `LevelManager.cs` (to start the level).
+-   `GameplayUIController.cs` (to hide gameplay UI elements).
+-   `InputManager.cs` (to set game playing state).
+-   Unity UI `Button` component.
+
+---
+
+### 3.2. `GameplayUIController.cs`
+
+**File Path:** `Assets/_Project/Scripts/UI/GameplayUIController.cs`
+
+**Purpose:**
+Manages the `GameplayUICanvas`, which contains UI elements visible during active gameplay. Specifically handles the display and interaction of the `LevelCompletePanel`.
+
+**Inheritance:** `MonoBehaviour`
+
+**Key Components Required on GameObject:** Typically attached to the `GameplayUICanvas` GameObject. Needs UI elements assigned in Inspector.
+
+**Public Members (Serialized Fields for Inspector):**
+
+-   **`[Header("Panels")]`**
+    -   **`[SerializeField] private GameObject levelCompletePanel;`**
+-   **`[Header("Buttons")]`**
+    -   **`[SerializeField] private Button returnToMenuButtonLevelComplete;`**
+-   **`[Header("Controller References")]`**
+    -   **`[SerializeField] private MainMenuController mainMenuController;`** (Primarily for fallback if LevelManager is missing)
 
 **Key Methods:**
 
 -   **`private void Awake()`**
-    -   Caches `Rigidbody2D`, `SpriteRenderer`. Sets initial color and `_rb.linearDamping = defaultDrag`.
--   **`private void Update()`**
-    -   Handles stabilization logic if launched, not stable, and in a stability zone. Checks velocity against `quasiStationaryVelocityThreshold`, manages `_stabilizationTimer`, updates color, and invokes `OnSeedStabilized` when stable. Resets stabilization progress if seed moves too fast or exits zone while stabilizing.
--   **`public void PrepareForAiming(Vector2 initialPosition)`**
-    -   Sets seed's `transform.position`. Sets `_rb.bodyType = RigidbodyType2D.Kinematic`, resets velocities and `_rb.linearDamping = defaultDrag`. Resets all state flags (`_isLaunched`, `_isStable`, etc.).
--   **`public void UpdateAimPosition(Vector2 worldPosition)`**
-    -   If `IsReadyForAiming`, sets `transform.position = worldPosition`.
--   **`public void Launch(Vector2 flickVector)`**
-    -   If not stable, sets `_rb.bodyType = RigidbodyType2D.Dynamic`, `_rb.linearDamping = defaultDrag`.
-    -   Applies force: `_rb.AddForce(flickVector * launchForceMultiplier, ForceMode2D.Impulse)`.
-    -   Sets `_isLaunched = true`, resets other relevant states, invokes `OnSeedLaunched`.
--   **`public void EnterStabilityZone(StabilityZone zone)`**
-    -   Sets flags (`_isInStabilityZone`, `_currentStabilityZone`). If `_rb` is dynamic, sets `_rb.linearDamping = dragInStabilityZone`.
--   **`public void ExitStabilityZone(StabilityZone zone)`**
-    -   Resets zone-related flags. If `_rb` is dynamic, reverts `_rb.linearDamping = defaultDrag`. Updates color if not stable.
--   **`public void ResetSeed(Vector2 startPosition)`**
-    -   Sets `_rb.linearDamping = defaultDrag`, then calls `PrepareForAiming(startPosition)`.
--   **`private void SetColor(Color newColor)`**
-    -   Helper to change `SpriteRenderer` color.
+    -   Ensures `levelCompletePanel` is initially hidden.
+    -   Assigns `returnToMenuButtonLevelComplete.onClick` listener to `HandleReturnToMenu`.
+    -   Checks for `mainMenuController` assignment.
+-   **`public void ShowLevelCompletePanel()`**
+    -   Activates `levelCompletePanel`.
+    -   Sets `Time.timeScale = 0f` to pause game.
+-   **`public void HideLevelCompletePanel()`**
+    -   Deactivates `levelCompletePanel`.
+-   **`private void HandleReturnToMenu()`**
+    -   Calls `HideLevelCompletePanel()`.
+    -   Deactivates the `GameplayUICanvas`'s GameObject.
+    -   Calls `LevelManager.Instance.ReturnToMainMenu()` to handle level cleanup and transition to main menu.
+    -   Includes a fallback to directly call `mainMenuController.ShowMenu()` if `LevelManager` is missing.
+-   **`public void ShowGameplayUI()`**
+    -   Activates the `GameplayUICanvas`'s GameObject.
+    -   Ensures `levelCompletePanel` is hidden via `HideLevelCompletePanel()`.
+-   **`public void HideGameplayUI()`**
+    -   Deactivates the `GameplayUICanvas`'s GameObject.
+-   **`private void OnDestroy()`**
+    -   Removes `returnToMenuButtonLevelComplete.onClick` listener.
 
 **Dependencies:**
 
--   `LevelManager.cs` (to call `PrepareForAiming`, `UpdateAimPosition`, `Launch`, `ResetSeed`).
--   `StabilityZone.cs` (to call `EnterStabilityZone`, `ExitStabilityZone`).
--   Requires `Rigidbody2D`, `CircleCollider2D`, `SpriteRenderer` on the same GameObject.
-
----
-
-### 2.3. `GravityWell_Star.cs`
-
-**File Path:** `Assets/_Project/Scripts/Gameplay/GravityWell_Star.cs`
-
-**Purpose:**
-Defines the behavior of a fixed "Star" gravity well. It exerts a radial gravitational pull on any GameObjects tagged "Seed" that enter its defined effect radius.
-_(No changes reported for this script in the last session, content remains as previously documented)._
-
-**Key Public Members:**
-
--   **`public float gravityStrength = 50f;`**
--   **`public float effectRadius = 5f;`**
-
----
-
-### 2.4. `StabilityZone.cs`
-
-**File Path:** `Assets/_Project/Scripts/Gameplay/StabilityZone.cs`
-
-**Purpose:**
-Defines a zone where "Seeds" can attempt to stabilize. It detects seeds entering and exiting its trigger volume and notifies the `SeedController` accordingly. It also provides visual feedback for its active state.
-_(No changes reported for this script in the last session, content remains as previously documented)._
-
-**Public Members (Serialized Fields):**
-
--   **`[SerializeField] private Color activeColor`**
--   **`[SerializeField] private Color inactiveColor`**
+-   `LevelManager.cs` (to initiate return to main menu sequence).
+-   `MainMenuController.cs` (for fallback return to menu).
+-   Unity UI `Button` and `GameObject` for panel management.
 
 ---
